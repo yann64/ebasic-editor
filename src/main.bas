@@ -1,17 +1,18 @@
 ' ebasic-editor - a code editor for eBasic, written in eBasic, using
 ' gtk4/eb-cjson as its GUI toolkit and JSON library.
 '
-' C0/C1/C2/C3/C4: dependency wiring, real eBasic syntax highlighting,
-' file I/O (Open/Save via GtkFileChooserNative, Ctrl+S), undo/redo, a
-' modified-indicator in the window title, a real ebasic_lsp client
-' (diagnostics squiggles, hover, go-to-definition, completion - see
-' src/lsp.bas), and now Build/Run/Test actions spawning `ebpm` with a
-' streaming output panel (see src/buildrun.bas). No git integration yet
-' (the final slice).
+' C0-C5: dependency wiring, real eBasic syntax highlighting, file I/O
+' (Open/Save via GtkFileChooserNative, Ctrl+S), undo/redo, a modified-
+' indicator in the window title, a real ebasic_lsp client (diagnostics
+' squiggles, hover, go-to-definition, completion - see src/lsp.bas),
+' Build/Run/Test actions spawning `ebpm` (see src/buildrun.bas), and now
+' Source Control actions spawning real `git` (see src/gitui.bas) - all
+' sharing one streaming output panel.
 
 #include "gtk4.iface.bas"
 #include "lsp.bas"
 #include "buildrun.bas"
+#include "gitui.bas"
 
 ' A code editor's own keybindings, not general-purpose GDK constants -
 ' kept local rather than added to gtk4 (see raw/gtk_eventkey.bas's own
@@ -223,6 +224,34 @@ SUB OnTestClicked(btn AS GObj PTR, data AS ANY PTR)
     CALL RunEbpmCommand("test", gHasPath, gCurrentPath)
 END SUB
 
+SUB OnGitStatusClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunGitStatus(gHasPath, gCurrentPath)
+END SUB
+
+SUB OnGitDiffClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunGitDiff(gHasPath, gCurrentPath)
+END SUB
+
+SUB OnGitStageClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunGitStage(gHasPath, gCurrentPath)
+END SUB
+
+SUB OnGitUnstageClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunGitUnstage(gHasPath, gCurrentPath)
+END SUB
+
+SUB OnGitCommitClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL ShowCommitDialog(gHasPath, gCurrentPath)
+END SUB
+
+SUB OnGitPushClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunGitPush(gHasPath, gCurrentPath)
+END SUB
+
+SUB OnGitPullClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunGitPull(gHasPath, gCurrentPath)
+END SUB
+
 ''' Ctrl+S saves; F1 shows hover info; F12 jumps to a definition; Ctrl+Space
 ''' requests completion (all shown/acted on via lsp.bas - see its own
 ''' LspRequestHover/Definition/Completion doc comments). Every other key
@@ -285,9 +314,10 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     scroller = NewScrolledWindow()
     CALL ScrolledWindowSetChild(scroller, view)
 
-    ' A read-only output panel for Build/Run/Test's streamed ebpm output
-    ' (see buildrun.bas) - a plain GtkTextView, not a SourceView (no
-    ' syntax highlighting needed for tool output).
+    ' A read-only output panel, shared by Build/Run/Test's streamed ebpm
+    ' output (see buildrun.bas) and Source Control's streamed git output
+    ' (see gitui.bas) - a plain GtkTextView, not a SourceView (no syntax
+    ' highlighting needed for tool output).
     DIM outputBuf AS TextBuffer
     outputBuf = NewTextBuffer()
     DIM outputView AS TextView
@@ -313,12 +343,56 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     gStatusLabel = NewLabel("")
     CALL WidgetSetSizeRequest(gStatusLabel, -1, 24)
 
+    ' A Source Control toolbar (see gitui.bas) - a second row rather than
+    ' more HeaderBar buttons (already at 7 with Open/Save/Undo/Redo/
+    ' Build/Run/Test), since gtk4 has no menu/popover bindings yet to
+    ' consolidate them.
+    DIM gitBar AS Box
+    gitBar = NewBox(GTK_ORIENTATION_HORIZONTAL, 4)
+
+    DIM gitStatusBtn AS Button
+    gitStatusBtn = NewButton("Git Status")
+    CALL ObjConnect(gitStatusBtn, "clicked", @OnGitStatusClicked, 0)
+    CALL BoxAppend(gitBar, gitStatusBtn)
+
+    DIM gitDiffBtn AS Button
+    gitDiffBtn = NewButton("Diff")
+    CALL ObjConnect(gitDiffBtn, "clicked", @OnGitDiffClicked, 0)
+    CALL BoxAppend(gitBar, gitDiffBtn)
+
+    DIM gitStageBtn AS Button
+    gitStageBtn = NewButton("Stage")
+    CALL ObjConnect(gitStageBtn, "clicked", @OnGitStageClicked, 0)
+    CALL BoxAppend(gitBar, gitStageBtn)
+
+    DIM gitUnstageBtn AS Button
+    gitUnstageBtn = NewButton("Unstage")
+    CALL ObjConnect(gitUnstageBtn, "clicked", @OnGitUnstageClicked, 0)
+    CALL BoxAppend(gitBar, gitUnstageBtn)
+
+    DIM gitCommitBtn AS Button
+    gitCommitBtn = NewButton("Commit...")
+    CALL ObjConnect(gitCommitBtn, "clicked", @OnGitCommitClicked, 0)
+    CALL BoxAppend(gitBar, gitCommitBtn)
+
+    DIM gitPushBtn AS Button
+    gitPushBtn = NewButton("Push")
+    CALL ObjConnect(gitPushBtn, "clicked", @OnGitPushClicked, 0)
+    CALL BoxAppend(gitBar, gitPushBtn)
+
+    DIM gitPullBtn AS Button
+    gitPullBtn = NewButton("Pull")
+    CALL ObjConnect(gitPullBtn, "clicked", @OnGitPullClicked, 0)
+    CALL BoxAppend(gitBar, gitPullBtn)
+
     DIM rootBox AS Box
     rootBox = NewBox(GTK_ORIENTATION_VERTICAL, 0)
+    CALL BoxAppend(rootBox, gitBar)
     CALL BoxAppend(rootBox, editorSplit)
     CALL BoxAppend(rootBox, gStatusLabel)
 
     CALL BuildRunInit(outputBuf)
+    CALL GitUiInit(outputBuf)
 
     DIM bar AS HeaderBar
     bar = NewHeaderBar()

@@ -14,9 +14,26 @@ single window with a `GtkSourceView`, real eBasic syntax highlighting
 (`data/language-specs/ebasic.lang`), Open/Save (via `GtkFileChooserNative`,
 plus `Ctrl+S`), undo/redo, a modified-indicator in the window title, a
 real `ebasic_lsp` client (live diagnostics, hover (`F1`),
-go-to-definition (`F12`), and completion (`Ctrl+Space`)), and now
-Build/Run/Test buttons spawning real `ebpm` commands with a streaming
-output panel. No `git` integration yet - the final slice.
+go-to-definition (`F12`), and completion (`Ctrl+Space`)), Build/Run/Test
+buttons spawning real `ebpm` commands, and now Source Control (status/
+diff/stage/unstage/commit/push/pull via the real `git` CLI) - all
+sharing one streaming output panel. This completes the editor's planned
+feature set (see `docs/architecture/roadmap.md` in the main `ebasic`
+repo); a final manual verification pass is next.
+
+## Source Control (`git`)
+
+A second toolbar row's Git Status/Diff/Stage/Unstage/Commit.../Push/Pull
+buttons spawn the real `git` CLI (never `libgit2` - matching `ebpm`'s own
+"shell out to the real tool" precedent) via the same `GSubprocess`
+plumbing as `ebpm` - see `src/gitui.bas`. Unlike `ebpm`, `git` needs no
+package-root discovery: any subcommand run from *any* directory inside a
+repo works (`git` itself walks up looking for `.git`), so the currently
+open file's own directory is always a valid `cwd`. `Commit...` opens a
+small message-entry window before running `git commit -m`. Output streams
+into the same panel Build/Run/Test uses. Matches this project's own
+locked-in git scope: status + diff + stage/commit + push/pull - no
+branch management, no merge UI, no commit-log/history view.
 
 ## Build/Run/Test (`ebpm`)
 
