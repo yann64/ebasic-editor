@@ -133,6 +133,56 @@ go-to-definition/completion to work - the editor itself still runs fine
 without it, just with those features disabled (see the status bar's own
 startup message).
 
+## Manual verification checklist
+
+This sandbox has no real GTK4 display backend (confirmed repeatedly -
+constructing a real `GtkWidget`, even just a `GtkLabel`, segfaults here;
+only display-*independent* GObjects like `GtkTextBuffer`/`GtkTextTag`
+work headlessly - see `eb-gtk4`'s own `idiomatic_smoke.bas` doc
+comment). Every automated test in `tests/` reflects that: they verify
+real, non-visual behavior (the LSP client's wire protocol, `ebpm`/`git`
+subprocess spawning and streaming, path logic) against real spawned
+processes - never a claim that the window itself renders correctly.
+This checklist is what's left to verify by hand, with a real display,
+following this project's own "real, honest verification" discipline
+(matching `eb-gtk4`'s own `tests/manual/widget_construction.bas`
+precedent) rather than silently assuming it from the automated pass:
+
+- [ ] `ebpm run` opens a window with the editor, header bar (Open/Save/
+      Undo/Redo/Build/Run/Test), a Source Control toolbar row, the
+      editor pane, output panel, and status bar all visible and laid out
+      sensibly.
+- [ ] Open `eb-gtk4`'s own `src/text.bas` - real eBasic syntax
+      highlighting appears (keywords, strings, comments, doc-comments).
+      Diagnostics squiggles appear if you introduce a real error; they
+      clear on fixing it. Hover (`F1`) and completion (`Ctrl+Space`) over
+      a real symbol show sensible text in the status bar. Go-to-
+      definition (`F12`) jumps within the file; on a symbol from a
+      dependency (cross-file), the status bar reports where it is
+      instead (no jump - see this file's own single-document scope cut).
+- [ ] Edit and Save (`Ctrl+S`); the title's `*` clears. Save As to a new
+      path; Undo/Redo work via `Ctrl+Z`/`Ctrl+Shift+Z`.
+- [ ] Click Build/Run/Test with a `.bas` file open inside a real `ebpm`
+      package (e.g. this repo's own `tests/lsp_client_smoke.bas`) - the
+      output panel streams real `ebpm` output and reports the exit
+      status.
+- [ ] With a real edit made, click Git Status/Diff - real output for
+      that change. Stage, then Unstage - `git status`'s own output
+      reflects each. `Commit...` opens the message window; confirming
+      commits for real (verify via a separate `git log`). Push/Pull
+      against a real remote you control - **do not** run these against
+      a repo you don't want touched; there is no confirmation prompt.
+- [ ] Resize the editor/output `GtkPaned` split - it's draggable and
+      remembers its position for the session.
+
+**Known, deliberate gap vs. the original plan**: the plan's own locked-
+in decision was "a flat file list of the opened folder's immediate
+contents" (avoiding `GListModel`/`GtkTreeListModel`). That file list was
+never actually built - this editor only ever opens/saves one file at a
+time via `GtkFileChooserNative`, with no sidebar/browser at all. `gtk4`'s
+`ListBox` bindings exist and are ready for this if it's picked up later;
+it just didn't make it into any of the C0-C5 slices as implemented.
+
 ## Architecture
 
 - The editor itself is a real eBasic program (an `ebpm [bin]` package) -
