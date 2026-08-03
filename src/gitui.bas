@@ -12,6 +12,7 @@
 
 #include once "glibextra.bas"
 #include once "buildrun.bas"
+#include once "filebrowser.bas"
 
 DIM gGitProc AS Subprocess
 DIM gGitOutPipe AS DataInputStream
@@ -42,6 +43,17 @@ SUB OnGitExit(source AS GObj PTR, res AS ANY PTR, data AS ANY PTR)
         CALL AppendGitOutput("(exited with a non-zero status)")
     END IF
     gGitRunning = 0
+
+    ' Stage/Unstage/Commit (and anything else run here) can change git's
+    ' own status output - refresh the sidebar's glyphs so they don't go
+    ' stale (see filebrowser.bas). Guarded on the sidebar actually having
+    ' been set up (FileBrowserInit called, a real widget behind
+    ' gSidebarBox) - this file's own headless test never does, and this
+    ' sandbox has no display to construct a real ListBox row on anyway.
+    IF gSidebarBox.handle <> 0 THEN
+        CALL ComputeGitDecorations()
+        CALL RefreshSidebarListBox(gSidebarBox)
+    END IF
 END SUB
 
 SUB OnGitLine(source AS GObj PTR, res AS ANY PTR, data AS ANY PTR)

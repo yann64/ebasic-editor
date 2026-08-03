@@ -15,11 +15,35 @@ single window with a `GtkSourceView`, real eBasic syntax highlighting
 plus `Ctrl+S`), undo/redo, a modified-indicator in the window title, a
 real `ebasic_lsp` client (live diagnostics, hover (`F1`),
 go-to-definition (`F12`), and completion (`Ctrl+Space`)), Build/Run/Test
-buttons spawning real `ebpm` commands, and now Source Control (status/
-diff/stage/unstage/commit/push/pull via the real `git` CLI) - all
-sharing one streaming output panel. This completes the editor's planned
-feature set (see `docs/architecture/roadmap.md` in the main `ebasic`
-repo); a final manual verification pass is next.
+buttons spawning real `ebpm` commands, Source Control (status/diff/stage/
+unstage/commit/push/pull via the real `git` CLI), and now a file/project
+browser sidebar with git-status glyphs - all sharing one streaming output
+panel. This completes the editor's originally planned feature set (see
+`docs/architecture/roadmap.md` in the main `ebasic` repo); a final manual
+verification pass is next.
+
+## File browser sidebar
+
+A resizable sidebar (a `GtkPaned` split, left of everything else) shows a
+*flat* list of the currently browsed folder's immediate contents - never
+a recursive tree (this project's own locked-in scope cut). Clicking a
+file loads it into the editor; clicking a directory descends into it
+(still flat - the list is simply replaced with that directory's own
+contents, one level at a time); a `..` entry (absent only at a real
+filesystem root) goes back up. Opening any file (via the header bar's
+Open button or a sidebar click) auto-populates the sidebar with that
+file's own siblings; "Open Folder" browses to a folder directly, without
+needing to open a file in it first. Entries render in whatever order
+`g_dir_read_name` yields (no sort - eBasic has no array-sort builtin
+yet).
+
+Each row showing up in `git status --porcelain=v1` gets its raw 2-
+character status code as a `[XY]` prefix (e.g. `[ M]` modified, `[??]`
+untracked) - refreshed automatically after Stage/Unstage/Commit, and
+whenever the sidebar itself refreshes. A status line for something
+*inside* a subdirectory never matches any row in the current flat view -
+silently not shown, a real, documented limitation of the flat-list model,
+not a bug. See `src/filebrowser.bas`.
 
 ## Source Control (`git`)
 
@@ -174,14 +198,15 @@ precedent) rather than silently assuming it from the automated pass:
       a repo you don't want touched; there is no confirmation prompt.
 - [ ] Resize the editor/output `GtkPaned` split - it's draggable and
       remembers its position for the session.
-
-**Known, deliberate gap vs. the original plan**: the plan's own locked-
-in decision was "a flat file list of the opened folder's immediate
-contents" (avoiding `GListModel`/`GtkTreeListModel`). That file list was
-never actually built - this editor only ever opens/saves one file at a
-time via `GtkFileChooserNative`, with no sidebar/browser at all. `gtk4`'s
-`ListBox` bindings exist and are ready for this if it's picked up later;
-it just didn't make it into any of the C0-C5 slices as implemented.
+- [ ] Open a real folder with a mix of files, subdirectories, and both
+      git-tracked and untracked files (e.g. this repo itself). The
+      sidebar lists them (in filesystem order - no sort); clicking a
+      file loads it and updates the title; clicking a directory descends
+      into it; `..` goes back up (absent only at a real filesystem
+      root). Rows for a modified/staged/untracked file show a `[XY]`
+      glyph matching `git status`'s own output; Stage/Unstage/Commit
+      visibly update it afterward. "Open Folder" browses to an empty/
+      unopened folder directly.
 
 ## Architecture
 

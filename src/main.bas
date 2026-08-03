@@ -1,18 +1,20 @@
 ' ebasic-editor - a code editor for eBasic, written in eBasic, using
 ' gtk4/eb-cjson as its GUI toolkit and JSON library.
 '
-' C0-C5: dependency wiring, real eBasic syntax highlighting, file I/O
+' C0-C7: dependency wiring, real eBasic syntax highlighting, file I/O
 ' (Open/Save via GtkFileChooserNative, Ctrl+S), undo/redo, a modified-
 ' indicator in the window title, a real ebasic_lsp client (diagnostics
 ' squiggles, hover, go-to-definition, completion - see src/lsp.bas),
-' Build/Run/Test actions spawning `ebpm` (see src/buildrun.bas), and now
-' Source Control actions spawning real `git` (see src/gitui.bas) - all
-' sharing one streaming output panel.
+' Build/Run/Test actions spawning `ebpm` (see src/buildrun.bas), Source
+' Control actions spawning real `git` (see src/gitui.bas), and now a
+' file/project browser sidebar with git-status glyphs (see
+' src/filebrowser.bas) - all sharing one streaming output panel.
 
-#include "gtk4.iface.bas"
-#include "lsp.bas"
-#include "buildrun.bas"
-#include "gitui.bas"
+#include once "gtk4.iface.bas"
+#include once "lsp.bas"
+#include once "buildrun.bas"
+#include once "gitui.bas"
+#include once "filebrowser.bas"
 
 ' A code editor's own keybindings, not general-purpose GDK constants -
 ' kept local rather than added to gtk4 (see raw/gtk_eventkey.bas's own
@@ -119,9 +121,13 @@ SUB SaveToPath(path AS STRING)
     ' needs a fresh didOpen - LspDidOpen itself already didClose's any
     ' previously open document first (see lsp.bas), so calling it again
     ' for a plain re-save of the *same* path would needlessly restart the
-    ' server's own diagnostics state for no reason.
+    ' server's own diagnostics state for no reason. A Save As into a new
+    ' folder (or a brand-new file appearing in the current one) always
+    ' refreshes the sidebar either way - cheap enough to not bother
+    ' checking whether the folder actually changed.
     IF wasHasPath = 0 OR wasPath <> path THEN
         CALL EnsureLspDoc()
+        CALL RefreshSidebar(gSidebarBox, DirOf(path))
     END IF
 END SUB
 
@@ -161,6 +167,34 @@ SUB OnSaveClicked(btn AS GObj PTR, data AS ANY PTR)
     CALL DoSave()
 END SUB
 
+''' Loads `path` into the editor buffer, records it as the current file,
+''' and refreshes the sidebar to `path`'s own directory - shared by the
+''' Open dialog and a sidebar file-row click (see filebrowser.bas's own
+''' OnSidebarRowActivated), so both behave identically. A no-op (silent)
+''' if `path` can't be read.
+SUB LoadFileIntoEditor(BYVAL path AS STRING)
+    DIM ok AS INTEGER
+    DIM rawContents AS ANY PTR
+    rawContents = ReadFileContents(path, ok)
+    IF ok = 0 THEN
+        EXIT SUB
+    END IF
+
+    DIM viaZstring AS ZSTRING
+    viaZstring = rawContents
+    DIM contents AS STRING
+    contents = viaZstring
+    CALL FreeGMallocString(rawContents)
+
+    CALL TextBufferSetText(gBuf, contents)
+    CALL TextBufferSetModified(gBuf, 0)
+    gCurrentPath = path
+    gHasPath = 1
+    CALL UpdateTitle()
+    CALL EnsureLspDoc()
+    CALL RefreshSidebar(gSidebarBox, DirOf(path))
+END SUB
+
 SUB OnOpenResponse(dialog AS GObj PTR, responseId AS INTEGER, data AS ANY PTR)
     DIM fc AS FileChooserNative
     fc = WrapFileChooserNative(dialog)
@@ -174,24 +208,7 @@ SUB OnOpenResponse(dialog AS GObj PTR, responseId AS INTEGER, data AS ANY PTR)
             DIM path AS STRING
             path = viaZstring
             CALL FreeGMallocString(rawPath)
-
-            DIM ok AS INTEGER
-            DIM rawContents AS ANY PTR
-            rawContents = ReadFileContents(path, ok)
-            IF ok <> 0 THEN
-                DIM viaZstring2 AS ZSTRING
-                viaZstring2 = rawContents
-                DIM contents AS STRING
-                contents = viaZstring2
-                CALL FreeGMallocString(rawContents)
-
-                CALL TextBufferSetText(gBuf, contents)
-                CALL TextBufferSetModified(gBuf, 0)
-                gCurrentPath = path
-                gHasPath = 1
-                CALL UpdateTitle()
-                CALL EnsureLspDoc()
-            END IF
+            CALL LoadFileIntoEditor(path)
         END IF
     END IF
     CALL FileChooserNativeDestroy(fc)
@@ -201,6 +218,36 @@ SUB OnOpenClicked(btn AS GObj PTR, data AS ANY PTR)
     DIM fc AS FileChooserNative
     fc = NewFileChooserNative("Open File", gWin, GTK_FILE_CHOOSER_ACTION_OPEN, "_Open", "_Cancel")
     CALL ObjConnect(fc, "response", @OnOpenResponse, 0)
+    CALL FileChooserNativeShow(fc)
+END SUB
+
+SUB OnOpenFolderResponse(dialog AS GObj PTR, responseId AS INTEGER, data AS ANY PTR)
+    DIM fc AS FileChooserNative
+    fc = WrapFileChooserNative(dialog)
+
+    IF responseId = GTK_RESPONSE_ACCEPT THEN
+        DIM rawPath AS ANY PTR
+        rawPath = FileChooserGetFilePath(fc)
+        IF rawPath <> 0 THEN
+            DIM viaZstring AS ZSTRING
+            viaZstring = rawPath
+            DIM path AS STRING
+            path = viaZstring
+            CALL FreeGMallocString(rawPath)
+            CALL RefreshSidebar(gSidebarBox, path)
+        END IF
+    END IF
+    CALL FileChooserNativeDestroy(fc)
+END SUB
+
+''' Browses to a folder without necessarily opening any file in it - the
+''' Open dialog/sidebar file clicks already establish sidebar context
+''' from whatever file you open; this is for starting from an empty or
+''' otherwise unopened folder instead.
+SUB OnOpenFolderClicked(btn AS GObj PTR, data AS ANY PTR)
+    DIM fc AS FileChooserNative
+    fc = NewFileChooserNative("Open Folder", gWin, GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Open", "_Cancel")
+    CALL ObjConnect(fc, "response", @OnOpenFolderResponse, 0)
     CALL FileChooserNativeShow(fc)
 END SUB
 
@@ -391,12 +438,38 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     CALL BoxAppend(rootBox, editorSplit)
     CALL BoxAppend(rootBox, gStatusLabel)
 
+    ' The file/project browser sidebar (see filebrowser.bas) - a flat
+    ' list of the currently browsed folder's immediate contents, git-
+    ' status-decorated. Row-activated (a click) loads a file, descends
+    ' into a directory, or goes up via "..".
+    DIM sidebarBox AS ListBox
+    sidebarBox = NewListBox()
+    CALL ListBoxSetActivateOnSingleClick(sidebarBox, 1)
+    CALL ObjConnect(sidebarBox, "row-activated", @OnSidebarRowActivated, 0)
+    DIM sidebarScroller AS ScrolledWindow
+    sidebarScroller = NewScrolledWindow()
+    CALL ScrolledWindowSetChild(sidebarScroller, sidebarBox)
+    CALL WidgetSetSizeRequest(sidebarScroller, 200, -1)
+
+    DIM mainSplit AS Paned
+    mainSplit = NewPaned(GTK_ORIENTATION_HORIZONTAL)
+    CALL PanedSetStartChild(mainSplit, sidebarScroller)
+    CALL PanedSetEndChild(mainSplit, rootBox)
+    CALL PanedSetPosition(mainSplit, 200)
+
     CALL BuildRunInit(outputBuf)
     CALL GitUiInit(outputBuf)
+    CALL FileBrowserInit(sidebarBox)
+    CALL RefreshSidebar(sidebarBox, ".")
 
     DIM bar AS HeaderBar
     bar = NewHeaderBar()
     CALL HeaderBarSetShowTitleButtons(bar, 1)
+
+    DIM openFolderBtn AS Button
+    openFolderBtn = NewButton("Open Folder")
+    CALL ObjConnect(openFolderBtn, "clicked", @OnOpenFolderClicked, 0)
+    CALL HeaderBarPackStart(bar, openFolderBtn)
 
     DIM openBtn AS Button
     openBtn = NewButton("Open")
@@ -434,7 +507,7 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     CALL HeaderBarPackEnd(bar, testBtn)
 
     CALL WindowSetTitlebar(gWin, bar)
-    CALL WindowSetChild(gWin, rootBox)
+    CALL WindowSetChild(gWin, mainSplit)
 
     gHasPath = 0
     CALL UpdateTitle()

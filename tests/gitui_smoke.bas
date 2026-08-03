@@ -17,6 +17,13 @@
 
 Declare Function system Lib "c" (ByVal command AS ZSTRING) AS INTEGER
 
+''' A stub - see tests/filebrowser_smoke.bas's own doc comment (gitui.bas
+''' now calls filebrowser.bas's RefreshGitDecorations/ListBox refresh from
+''' OnGitExit, which transitively needs OnSidebarRowActivated's own
+''' LoadFileIntoEditor reference to resolve when compiled standalone).
+SUB LoadFileIntoEditor(BYVAL path AS STRING)
+END SUB
+
 DIM setupOk AS INTEGER
 setupOk = system("rm -rf /tmp/ebasic_editor_gitui_test && " & _
     "mkdir -p /tmp/ebasic_editor_gitui_test && " & _
