@@ -2,16 +2,16 @@
 
 [[package]]
 name = "eb-cjson"
-path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-cjson_v0.1.0"
-commit = "73c9afd24f7b4062cbc8d63246f120036e17e21c"
-version = "0.1.0"
+path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-cjson_v0.2.0"
+commit = "bbce6026d0318451c7b10109e040880948ec37e3"
+version = "0.2.0"
 git = "https://github.com/yann64/eb-cjson"
-ref = "v0.1.0"
+ref = "v0.2.0"
 
 [[package]]
 name = "gtk4"
-path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-gtk4_v0.3.0"
-commit = "0f6bb4dd5ae9c306723cc5bc056fcf159d8ac7f9"
-version = "0.3.0"
+path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-gtk4_v0.4.0"
+commit = "5a13171ba4fc23f4d1f4a7674363c20d0b642874"
+version = "0.4.0"
 git = "https://github.com/yann64/eb-gtk4"
-ref = "v0.3.0"
+ref = "v0.4.0"

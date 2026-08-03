@@ -1,12 +1,23 @@
 ' ebasic-editor - a code editor for eBasic, written in eBasic, using
 ' gtk4/eb-cjson as its GUI toolkit and JSON library.
 '
-' C0/C1/C2: dependency wiring, real eBasic syntax highlighting, and now
-' file I/O (Open/Save via GtkFileChooserNative, Ctrl+S), undo/redo, and a
-' modified-indicator in the window title. No LSP/ebpm/git integration
-' yet (all follow in later slices).
+' C0/C1/C2/C3: dependency wiring, real eBasic syntax highlighting, file
+' I/O (Open/Save via GtkFileChooserNative, Ctrl+S), undo/redo, a
+' modified-indicator in the window title, and now a real ebasic_lsp
+' client (diagnostics squiggles, hover, go-to-definition, completion -
+' see src/lsp.bas). No ebpm/git integration yet (later slices).
 
 #include "gtk4.iface.bas"
+#include "lsp.bas"
+
+' A code editor's own keybindings, not general-purpose GDK constants -
+' kept local rather than added to gtk4 (see raw/gtk_eventkey.bas's own
+' GDK_KEY_s for the general-purpose ones). Values verified against the
+' real installed gdk/gdkkeysyms.h (eBasic has no hex literal syntax, so
+' these are written out in decimal: 0xffbe/0xffc9/0x20).
+CONST GDK_KEY_F1 = 65470
+CONST GDK_KEY_F12 = 65481
+CONST GDK_KEY_space = 32
 
 ' Module-level globals - eBasic has no closures, so state shared across
 ' several independent signal handlers (a button click, a key press, a
@@ -16,6 +27,7 @@ DIM gWin AS Window
 DIM gBuf AS SourceBuffer
 DIM gCurrentPath AS STRING
 DIM gHasPath AS INTEGER
+DIM gStatusLabel AS Label
 
 ''' Sets the window title to the current file's name (or "Untitled"),
 ''' with a leading "*" while there are unsaved changes.
@@ -41,6 +53,42 @@ SUB OnBufferModifiedChanged(buffer AS GObj PTR, data AS ANY PTR)
     CALL UpdateTitle()
 END SUB
 
+''' Reports the buffer's current content to ebasic_lsp on every edit -
+''' see lsp.bas's own LspDidChange doc comment on why no debouncing is
+''' done here yet.
+SUB OnBufferChanged(buffer AS GObj PTR, data AS ANY PTR)
+    DIM rawText AS ANY PTR
+    rawText = TextBufferGetText(gBuf)
+    DIM viaZstring AS ZSTRING
+    viaZstring = rawText
+    DIM text AS STRING
+    text = viaZstring
+    CALL FreeGMallocString(rawText)
+
+    CALL LspDidChange(text)
+END SUB
+
+''' Tells ebasic_lsp about the file now backing the buffer (after an
+''' Open or a first Save As) - "file://" + an absolute path, no percent-
+''' encoding (a deliberate v1 scope cut: Linux-only, plain local paths,
+''' matching the LSP's own test suite convention of unencoded file://
+''' URIs).
+SUB EnsureLspDoc()
+    IF gHasPath = 0 THEN
+        EXIT SUB
+    END IF
+
+    DIM rawText AS ANY PTR
+    rawText = TextBufferGetText(gBuf)
+    DIM viaZstring AS ZSTRING
+    viaZstring = rawText
+    DIM text AS STRING
+    text = viaZstring
+    CALL FreeGMallocString(rawText)
+
+    CALL LspDidOpen("file://" & gCurrentPath, text)
+END SUB
+
 ''' Writes the buffer's current content to `path`, records it as the
 ''' current file, and clears the modified flag.
 SUB SaveToPath(path AS STRING)
@@ -52,11 +100,25 @@ SUB SaveToPath(path AS STRING)
     text = viaZstring
     CALL FreeGMallocString(rawText)
 
+    DIM wasHasPath AS INTEGER
+    DIM wasPath AS STRING
+    wasHasPath = gHasPath
+    wasPath = gCurrentPath
+
     CALL WriteFileContents(path, text)
     CALL TextBufferSetModified(gBuf, 0)
     gCurrentPath = path
     gHasPath = 1
     CALL UpdateTitle()
+
+    ' Only a brand-new Save As (or the first Save of an untitled buffer)
+    ' needs a fresh didOpen - LspDidOpen itself already didClose's any
+    ' previously open document first (see lsp.bas), so calling it again
+    ' for a plain re-save of the *same* path would needlessly restart the
+    ' server's own diagnostics state for no reason.
+    IF wasHasPath = 0 OR wasPath <> path THEN
+        CALL EnsureLspDoc()
+    END IF
 END SUB
 
 SUB OnSaveResponse(dialog AS GObj PTR, responseId AS INTEGER, data AS ANY PTR)
@@ -124,6 +186,7 @@ SUB OnOpenResponse(dialog AS GObj PTR, responseId AS INTEGER, data AS ANY PTR)
                 gCurrentPath = path
                 gHasPath = 1
                 CALL UpdateTitle()
+                CALL EnsureLspDoc()
             END IF
         END IF
     END IF
@@ -145,12 +208,26 @@ SUB OnRedoClicked(btn AS GObj PTR, data AS ANY PTR)
     CALL TextBufferRedo(gBuf)
 END SUB
 
-''' Ctrl+S saves - every other key is left to GtkSourceView's own default
-''' handling (including its built-in Ctrl+Z/Ctrl+Shift+Z undo/redo, which
-''' needs no wiring here at all).
+''' Ctrl+S saves; F1 shows hover info; F12 jumps to a definition; Ctrl+Space
+''' requests completion (all shown/acted on via lsp.bas - see its own
+''' LspRequestHover/Definition/Completion doc comments). Every other key
+''' is left to GtkSourceView's own default handling (including its
+''' built-in Ctrl+Z/Ctrl+Shift+Z undo/redo, which needs no wiring here).
 FUNCTION OnKeyPressed(controller AS GObj PTR, keyval AS INTEGER, keycode AS INTEGER, state AS INTEGER, data AS ANY PTR) AS INTEGER
-    IF keyval = GDK_KEY_s AND (state AND GDK_CONTROL_MASK) <> 0 THEN
+    DIM ctrlHeld AS INTEGER
+    ctrlHeld = ((state AND GDK_CONTROL_MASK) <> 0)
+
+    IF keyval = GDK_KEY_s AND ctrlHeld THEN
         CALL DoSave()
+        OnKeyPressed = 1
+    ELSEIF keyval = GDK_KEY_F1 THEN
+        CALL LspRequestHover(TextBufferGetCursorLine(gBuf), TextBufferGetCursorColumn(gBuf))
+        OnKeyPressed = 1
+    ELSEIF keyval = GDK_KEY_F12 THEN
+        CALL LspRequestDefinition(TextBufferGetCursorLine(gBuf), TextBufferGetCursorColumn(gBuf))
+        OnKeyPressed = 1
+    ELSEIF keyval = GDK_KEY_space AND ctrlHeld THEN
+        CALL LspRequestCompletion(TextBufferGetCursorLine(gBuf), TextBufferGetCursorColumn(gBuf))
         OnKeyPressed = 1
     ELSE
         OnKeyPressed = 0
@@ -175,6 +252,7 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     CALL TextBufferSetText(gBuf, "PRINT ""Hello from ebasic-editor!""")
     CALL TextBufferSetModified(gBuf, 0)
     CALL ObjConnect(gBuf, "modified-changed", @OnBufferModifiedChanged, 0)
+    CALL ObjConnect(gBuf, "changed", @OnBufferChanged, 0)
 
     DIM view AS SourceView
     view = NewSourceViewWithBuffer(gBuf)
@@ -191,6 +269,18 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     DIM scroller AS ScrolledWindow
     scroller = NewScrolledWindow()
     CALL ScrolledWindowSetChild(scroller, view)
+
+    ' A status bar for LSP results (hover text, diagnostic counts,
+    ' completion candidates - see lsp.bas's own LspSetStatus) - a plain
+    ' Label rather than a popup/popover this sandbox has no way to
+    ' visually verify (see lsp.bas's own doc comments on that scope cut).
+    gStatusLabel = NewLabel("")
+    CALL WidgetSetSizeRequest(gStatusLabel, -1, 24)
+
+    DIM rootBox AS Box
+    rootBox = NewBox(GTK_ORIENTATION_VERTICAL, 0)
+    CALL BoxAppend(rootBox, scroller)
+    CALL BoxAppend(rootBox, gStatusLabel)
 
     DIM bar AS HeaderBar
     bar = NewHeaderBar()
@@ -217,10 +307,19 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     CALL HeaderBarPackStart(bar, redoBtn)
 
     CALL WindowSetTitlebar(gWin, bar)
-    CALL WindowSetChild(gWin, scroller)
+    CALL WindowSetChild(gWin, rootBox)
 
     gHasPath = 0
     CALL UpdateTitle()
+
+    CALL LspInit(gBuf, gStatusLabel)
+    IF LspStart("ebasic_lsp") = 0 THEN
+        CALL LspSetStatus("ebasic_lsp not found on PATH - diagnostics/hover/go-to-definition/completion disabled")
+    ELSEIF LspInitialize() = 0 THEN
+        CALL LspSetStatus("ebasic_lsp failed to initialize")
+    ELSE
+        CALL LspSetStatus("ebasic_lsp ready")
+    END IF
 
     CALL WindowPresent(gWin)
 END SUB
@@ -229,4 +328,5 @@ DIM app AS Application
 app = NewApplication("io.github.yann64.ebasiceditor")
 CALL ObjConnect(app, "activate", @OnActivate, 0)
 CALL ApplicationRun(app)
+CALL LspStop()
 CALL ObjDestroy(app)

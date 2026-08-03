@@ -12,8 +12,49 @@ completion, `ebpm` for build/run/test, and real `git` integration.
 Early development, Linux-only (matching `eb-gtk4`'s own current scope). A
 single window with a `GtkSourceView`, real eBasic syntax highlighting
 (`data/language-specs/ebasic.lang`), Open/Save (via `GtkFileChooserNative`,
-plus `Ctrl+S`), undo/redo, and a modified-indicator in the window title -
-no LSP, `ebpm`, or `git` integration yet; each lands in its own slice.
+plus `Ctrl+S`), undo/redo, a modified-indicator in the window title, and
+now a real `ebasic_lsp` client - live diagnostics, hover (`F1`),
+go-to-definition (`F12`), and completion (`Ctrl+Space`), all backed by a
+real spawned `ebasic_lsp` process. No `ebpm`/`git` integration yet - each
+lands in its own slice.
+
+## Language server (`ebasic_lsp`)
+
+`src/lsp.bas` spawns `ebasic_lsp` (found on `PATH`, alongside `ebc`/
+`ebpm`) via `gtk4`'s `GSubprocess` bindings and speaks its real
+`Content-Length`-framed JSON-RPC protocol over stdio (see
+[`docs/guide/lsp.md`](https://github.com/yann64/ebasic/blob/main/docs/guide/lsp.md)
+in the main `ebasic` repo) - the wire format itself is built with
+`eb-cjson`.
+
+- **Diagnostics**: every edit sends a `textDocument/didChange`
+  notification; the resulting `textDocument/publishDiagnostics` is
+  rendered as a real `GtkTextTag` squiggle (`PANGO_UNDERLINE_ERROR`/
+  `_SINGLE`, see `gtk4`'s own `TextBufferCreateUnderlineTag` - added
+  specifically for this), plus a problem count in the status bar.
+- **Hover** (`F1`), **go-to-definition** (`F12`), and **completion**
+  (`Ctrl+Space`) all show their result in the status bar - not an
+  interactive tooltip/popover/completion-list popup. This is a
+  deliberate v1 scope cut: `gtk4` has no tooltip-forcing or popover
+  bindings yet, and building one specifically for this would be new,
+  unverifiable-in-this-sandbox GTK surface rather than reusing what
+  already exists. Completion in particular just prints the (up to 8)
+  candidate labels as text to type from, not something to click.
+- **Single-document scope**: a `publishDiagnostics` for a file other than
+  the one currently open (e.g. an `#include`d file) isn't rendered
+  inline; a go-to-definition landing in a different file reports where
+  it is instead of jumping (this editor has no multi-file/tab support
+  yet - see the main repo's own roadmap for that scope cut).
+- **No debouncing**: every keystroke sends a full-text `didChange` -
+  matching the server's own full-text-replace sync model and its own
+  reasoning ("files are small enough that incremental sync isn't worth
+  the complexity" - see `lsp.md`).
+- `tests/lsp_client_smoke.bas` drives the whole client against a real,
+  spawned `ebasic_lsp` headlessly (`GtkSourceBuffer`/`GtkTextTag` need no
+  display to construct or operate on, unlike a real `GtkWidget` - see
+  `eb-gtk4`'s own `idiomatic_smoke.bas` doc comment) - initialize, a real
+  Sema error surfacing and clearing, hover, go-to-definition, and
+  completion, all verified end to end under `ebpm test`.
 
 ## Editing
 
@@ -55,7 +96,11 @@ GUI application - there's no headless mode). Requires `ebc`/`ebpm` built
 from a version including the upstream compiler fixes `eb-gtk4` itself
 needed (see its own README) - both are automatically fetched via `ebpm`'s
 registry (`gtk4`/`eb-cjson`), no manual setup beyond the GTK4 dev
-libraries themselves.
+libraries themselves. `ebasic_lsp` must be on `PATH` (built alongside
+`ebc`/`ebpm` from the main `ebasic` repo) for diagnostics/hover/
+go-to-definition/completion to work - the editor itself still runs fine
+without it, just with those features disabled (see the status bar's own
+startup message).
 
 ## Architecture
 
