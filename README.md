@@ -12,11 +12,25 @@ completion, `ebpm` for build/run/test, and real `git` integration.
 Early development, Linux-only (matching `eb-gtk4`'s own current scope). A
 single window with a `GtkSourceView`, real eBasic syntax highlighting
 (`data/language-specs/ebasic.lang`), Open/Save (via `GtkFileChooserNative`,
-plus `Ctrl+S`), undo/redo, a modified-indicator in the window title, and
-now a real `ebasic_lsp` client - live diagnostics, hover (`F1`),
-go-to-definition (`F12`), and completion (`Ctrl+Space`), all backed by a
-real spawned `ebasic_lsp` process. No `ebpm`/`git` integration yet - each
-lands in its own slice.
+plus `Ctrl+S`), undo/redo, a modified-indicator in the window title, a
+real `ebasic_lsp` client (live diagnostics, hover (`F1`),
+go-to-definition (`F12`), and completion (`Ctrl+Space`)), and now
+Build/Run/Test buttons spawning real `ebpm` commands with a streaming
+output panel. No `git` integration yet - the final slice.
+
+## Build/Run/Test (`ebpm`)
+
+The header bar's Build/Run/Test buttons spawn `ebpm build`/`run`/`test`
+(found on `PATH`, alongside `ebc`/`ebasic_lsp`) via the same
+`GSubprocess` primitive `src/lsp.bas` uses - see `src/buildrun.bas`. The
+package root is found by walking up from the currently open file's own
+directory looking for `ebasic.toml`, the same convention `ebpm`/
+`ebasic_lsp` themselves use ("open a file inside an `ebpm` package
+first" if none is found). Output streams into a read-only panel below
+the editor (a resizable `GtkPaned` split) one line at a time as it
+arrives - async, so a slow build never freezes the window - followed by
+a `(finished successfully)`/`(exited with a non-zero status)` line once
+the process exits.
 
 ## Language server (`ebasic_lsp`)
 

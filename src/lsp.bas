@@ -20,6 +20,7 @@
 ' each happen once, at startup/teardown.
 
 #include once "eb-cjson.iface.bas"
+#include once "glibextra.bas"
 
 ' libc helpers this file needs for its own wire-format plumbing - eBasic's
 ' STRING has no built-in parsing/formatting functions yet (LEN/MID$/
@@ -30,17 +31,6 @@ Declare Function atoi Lib "c" (ByVal s AS ZSTRING) AS INTEGER
 Declare Function strlen Lib "c" (ByVal s AS ZSTRING) AS ULONGINT
 Declare Function strcpy Lib "c" (ByVal dst AS ANY PTR, ByVal src AS ZSTRING) AS ZSTRING
 Declare Function strcat Lib "c" (ByVal dst AS ANY PTR, ByVal src AS ZSTRING) AS ZSTRING
-
-' Raw GLib declarations this file needs directly - a package's `--lib`
-' interface only ever re-exports its own idiomatic-layer SUB/FUNCTION
-' bodies, never a raw Extern declaration (see eb-gtk4's own README), so
-' g_malloc/g_free/g_main_context_iteration (used internally by gtk4's own
-' bindings) aren't visible through gtk4.iface.bas - this package
-' redeclares them itself, the same way eb-gtk4 redeclares libc's strlen
-' for its own internal use.
-Declare Function g_malloc Lib "glib-2.0" (ByVal n_bytes AS ULONGINT) AS ANY PTR
-Declare Sub g_free Lib "glib-2.0" (ByVal mem AS ANY PTR)
-Declare Function g_main_context_iteration Lib "glib-2.0" (ByVal context AS ANY PTR, ByVal may_block AS INTEGER) AS INTEGER
 
 DIM gLspProc AS Subprocess
 DIM gLspStdin AS OutputStream

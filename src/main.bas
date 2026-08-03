@@ -1,14 +1,17 @@
 ' ebasic-editor - a code editor for eBasic, written in eBasic, using
 ' gtk4/eb-cjson as its GUI toolkit and JSON library.
 '
-' C0/C1/C2/C3: dependency wiring, real eBasic syntax highlighting, file
-' I/O (Open/Save via GtkFileChooserNative, Ctrl+S), undo/redo, a
-' modified-indicator in the window title, and now a real ebasic_lsp
-' client (diagnostics squiggles, hover, go-to-definition, completion -
-' see src/lsp.bas). No ebpm/git integration yet (later slices).
+' C0/C1/C2/C3/C4: dependency wiring, real eBasic syntax highlighting,
+' file I/O (Open/Save via GtkFileChooserNative, Ctrl+S), undo/redo, a
+' modified-indicator in the window title, a real ebasic_lsp client
+' (diagnostics squiggles, hover, go-to-definition, completion - see
+' src/lsp.bas), and now Build/Run/Test actions spawning `ebpm` with a
+' streaming output panel (see src/buildrun.bas). No git integration yet
+' (the final slice).
 
 #include "gtk4.iface.bas"
 #include "lsp.bas"
+#include "buildrun.bas"
 
 ' A code editor's own keybindings, not general-purpose GDK constants -
 ' kept local rather than added to gtk4 (see raw/gtk_eventkey.bas's own
@@ -208,6 +211,18 @@ SUB OnRedoClicked(btn AS GObj PTR, data AS ANY PTR)
     CALL TextBufferRedo(gBuf)
 END SUB
 
+SUB OnBuildClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunEbpmCommand("build", gHasPath, gCurrentPath)
+END SUB
+
+SUB OnRunClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunEbpmCommand("run", gHasPath, gCurrentPath)
+END SUB
+
+SUB OnTestClicked(btn AS GObj PTR, data AS ANY PTR)
+    CALL RunEbpmCommand("test", gHasPath, gCurrentPath)
+END SUB
+
 ''' Ctrl+S saves; F1 shows hover info; F12 jumps to a definition; Ctrl+Space
 ''' requests completion (all shown/acted on via lsp.bas - see its own
 ''' LspRequestHover/Definition/Completion doc comments). Every other key
@@ -270,6 +285,27 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     scroller = NewScrolledWindow()
     CALL ScrolledWindowSetChild(scroller, view)
 
+    ' A read-only output panel for Build/Run/Test's streamed ebpm output
+    ' (see buildrun.bas) - a plain GtkTextView, not a SourceView (no
+    ' syntax highlighting needed for tool output).
+    DIM outputBuf AS TextBuffer
+    outputBuf = NewTextBuffer()
+    DIM outputView AS TextView
+    outputView = NewTextView()
+    CALL TextViewSetBuffer(outputView, outputBuf)
+    CALL TextViewSetEditable(outputView, 0)
+    CALL TextViewSetMonospace(outputView, 1)
+    DIM outputScroller AS ScrolledWindow
+    outputScroller = NewScrolledWindow()
+    CALL ScrolledWindowSetChild(outputScroller, outputView)
+    CALL WidgetSetSizeRequest(outputScroller, -1, 150)
+
+    DIM editorSplit AS Paned
+    editorSplit = NewPaned(GTK_ORIENTATION_VERTICAL)
+    CALL PanedSetStartChild(editorSplit, scroller)
+    CALL PanedSetEndChild(editorSplit, outputScroller)
+    CALL PanedSetPosition(editorSplit, 400)
+
     ' A status bar for LSP results (hover text, diagnostic counts,
     ' completion candidates - see lsp.bas's own LspSetStatus) - a plain
     ' Label rather than a popup/popover this sandbox has no way to
@@ -279,8 +315,10 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
 
     DIM rootBox AS Box
     rootBox = NewBox(GTK_ORIENTATION_VERTICAL, 0)
-    CALL BoxAppend(rootBox, scroller)
+    CALL BoxAppend(rootBox, editorSplit)
     CALL BoxAppend(rootBox, gStatusLabel)
+
+    CALL BuildRunInit(outputBuf)
 
     DIM bar AS HeaderBar
     bar = NewHeaderBar()
@@ -305,6 +343,21 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     redoBtn = NewButton("Redo")
     CALL ObjConnect(redoBtn, "clicked", @OnRedoClicked, 0)
     CALL HeaderBarPackStart(bar, redoBtn)
+
+    DIM buildBtn AS Button
+    buildBtn = NewButton("Build")
+    CALL ObjConnect(buildBtn, "clicked", @OnBuildClicked, 0)
+    CALL HeaderBarPackEnd(bar, buildBtn)
+
+    DIM runBtn AS Button
+    runBtn = NewButton("Run")
+    CALL ObjConnect(runBtn, "clicked", @OnRunClicked, 0)
+    CALL HeaderBarPackEnd(bar, runBtn)
+
+    DIM testBtn AS Button
+    testBtn = NewButton("Test")
+    CALL ObjConnect(testBtn, "clicked", @OnTestClicked, 0)
+    CALL HeaderBarPackEnd(bar, testBtn)
 
     CALL WindowSetTitlebar(gWin, bar)
     CALL WindowSetChild(gWin, rootBox)

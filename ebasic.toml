@@ -7,5 +7,5 @@ name = "ebasic-editor"
 path = "src/main.bas"
 
 [dependencies]
-gtk4 = "^0.4"
+gtk4 = "^0.5"
 eb-cjson = "^0.2"
