@@ -10,8 +10,8 @@ ref = "v0.1.0"
 
 [[package]]
 name = "gtk4"
-path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-gtk4_v0.2.1"
-commit = "02c057232bad4c98e2249b03f96c7cdf440fd49d"
-version = "0.2.1"
+path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-gtk4_v0.3.0"
+commit = "0f6bb4dd5ae9c306723cc5bc056fcf159d8ac7f9"
+version = "0.3.0"
 git = "https://github.com/yann64/eb-gtk4"
-ref = "v0.2.1"
+ref = "v0.3.0"

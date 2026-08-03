@@ -10,9 +10,21 @@ completion, `ebpm` for build/run/test, and real `git` integration.
 ## Status
 
 Early development, Linux-only (matching `eb-gtk4`'s own current scope). A
-single window with a `GtkSourceView` and a real eBasic syntax-highlighting
-definition (`data/language-specs/ebasic.lang`) - no file I/O, LSP, `ebpm`,
-or `git` integration yet; each lands in its own slice.
+single window with a `GtkSourceView`, real eBasic syntax highlighting
+(`data/language-specs/ebasic.lang`), Open/Save (via `GtkFileChooserNative`,
+plus `Ctrl+S`), undo/redo, and a modified-indicator in the window title -
+no LSP, `ebpm`, or `git` integration yet; each lands in its own slice.
+
+## Editing
+
+Open/Save buttons in the header bar (and `Ctrl+S`) read/write the buffer's
+content via `gtk4`'s plain-path file I/O (`ReadFileContents`/
+`WriteFileContents`); Undo/Redo buttons call `GtkSourceView`'s own built-in
+undo manager directly - `Ctrl+Z`/`Ctrl+Shift+Z` already work out of the
+box via the widget's own default key bindings, no extra wiring needed for
+those. The window title shows the current file's name with a leading `*`
+while there are unsaved changes, kept in sync via the buffer's own
+`"modified-changed"` signal.
 
 ## Syntax highlighting
 
