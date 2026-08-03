@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+ GtkSourceView language spec for eBasic (https://github.com/yann64/ebasic).
+ Modeled directly on GtkSourceView's own real vbnet.lang (a close relative -
+ both are case-insensitive BASIC-family languages) for schema/convention
+ accuracy, not written from scratch. Keyword list extracted from the real
+ eBasic lexer's own keyword table (compiler/src/lexer/lexer.cpp), not
+ guessed or copied from vbnet.lang's own (different) keyword set.
+
+ Loaded via a custom search path (this repo's own data/language-specs/
+ directory, appended at runtime through GtkSourceLanguageManager) - no
+ system install, no root needed. See ebasic-editor's own source for where
+ that happens.
+
+-->
+<language id="ebasic" name="eBasic" version="2.0" _section="Source">
+  <metadata>
+    <property name="mimetypes">text/x-ebasic</property>
+    <property name="globs">*.bas</property>
+    <property name="line-comment-start">'</property>
+  </metadata>
+
+  <styles>
+    <style id="comment" name="Comment" map-to="def:comment"/>
+    <style id="doc-comment" name="Doc Comment" map-to="def:doc-comment"/>
+    <style id="string" name="String" map-to="def:string"/>
+    <style id="preprocessor" name="Preprocessor" map-to="def:preprocessor"/>
+    <style id="keyword" name="Keyword" map-to="def:keyword"/>
+    <style id="type" name="Data Type" map-to="def:type"/>
+    <style id="boolean" name="Boolean value" map-to="def:boolean"/>
+    <style id="decimal" name="Decimal number" map-to="def:decimal"/>
+  </styles>
+
+  <default-regex-options case-sensitive="false"/>
+
+  <definitions>
+
+    <!-- eBasic doc comments (''') use one apostrophe more than a plain
+         line comment (') - matched first so it always wins. -->
+    <context id="doc-comment" style-ref="doc-comment" end-at-line-end="true" class="comment" class-disabled="no-spell-check">
+      <start>'''</start>
+      <include>
+        <context ref="def:in-line-comment"/>
+      </include>
+    </context>
+
+    <context id="line-comment" style-ref="comment" end-at-line-end="true" class="comment" class-disabled="no-spell-check">
+      <start>'</start>
+      <include>
+        <context ref="def:in-line-comment"/>
+      </include>
+    </context>
+
+    <!-- Doubled double-quotes ("") are the escape for a literal quote
+         inside a string (the classic BASIC convention - no backslash
+         escapes at all); matched as its own context so it isn't
+         mistaken for the string's own closing quote. -->
+    <context id="string" style-ref="string" end-at-line-end="true" class="string" class-disabled="no-spell-check">
+      <start>"</start>
+      <end>"</end>
+      <include>
+        <context id="escaped-quote" style-ref="string" extend-parent="true">
+          <match>""</match>
+        </context>
+      </include>
+    </context>
+
+    <context id="preprocessor" style-ref="preprocessor" end-at-line-end="true">
+      <start extended="true">
+        ^\s*\#\s*
+        (include|define|ifdef|ifndef|else|elif|endif|platform)
+        \b
+      </start>
+      <include>
+        <context ref="line-comment"/>
+        <context ref="string"/>
+      </include>
+    </context>
+
+    <context id="keywords" style-ref="keyword">
+      <keyword>alias</keyword>
+      <keyword>and</keyword>
+      <keyword>as</keyword>
+      <keyword>base</keyword>
+      <keyword>byref</keyword>
+      <keyword>byval</keyword>
+      <keyword>call</keyword>
+      <keyword>case</keyword>
+      <keyword>cdecl</keyword>
+      <keyword>const</keyword>
+      <keyword>constructor</keyword>
+      <keyword>declare</keyword>
+      <keyword>destructor</keyword>
+      <keyword>dim</keyword>
+      <keyword>do</keyword>
+      <keyword>else</keyword>
+      <keyword>elseif</keyword>
+      <keyword>end</keyword>
+      <keyword>enum</keyword>
+      <keyword>exit</keyword>
+      <keyword>extends</keyword>
+      <keyword>extern</keyword>
+      <keyword>for</keyword>
+      <keyword>function</keyword>
+      <keyword>gosub</keyword>
+      <keyword>goto</keyword>
+      <keyword>if</keyword>
+      <keyword>lib</keyword>
+      <keyword>loop</keyword>
+      <keyword>mod</keyword>
+      <keyword>namespace</keyword>
+      <keyword>next</keyword>
+      <keyword>not</keyword>
+      <keyword>operator</keyword>
+      <keyword>or</keyword>
+      <keyword>override</keyword>
+      <keyword>preserve</keyword>
+      <keyword>print</keyword>
+      <keyword>property</keyword>
+      <keyword>redim</keyword>
+      <keyword>return</keyword>
+      <keyword>select</keyword>
+      <keyword>shl</keyword>
+      <keyword>shr</keyword>
+      <keyword>step</keyword>
+      <keyword>sub</keyword>
+      <keyword>then</keyword>
+      <keyword>this</keyword>
+      <keyword>to</keyword>
+      <keyword>type</keyword>
+      <keyword>union</keyword>
+      <keyword>until</keyword>
+      <keyword>virtual</keyword>
+      <keyword>wend</keyword>
+      <keyword>while</keyword>
+      <keyword>xor</keyword>
+    </context>
+
+    <context id="types" style-ref="type">
+      <keyword>any</keyword>
+      <keyword>boolean</keyword>
+      <keyword>byte</keyword>
+      <keyword>double</keyword>
+      <keyword>integer</keyword>
+      <keyword>long</keyword>
+      <keyword>longint</keyword>
+      <keyword>ptr</keyword>
+      <keyword>short</keyword>
+      <keyword>single</keyword>
+      <keyword>string</keyword>
+      <keyword>ubyte</keyword>
+      <keyword>uinteger</keyword>
+      <keyword>ulongint</keyword>
+      <keyword>ushort</keyword>
+      <keyword>zstring</keyword>
+    </context>
+
+    <context id="boolean" style-ref="boolean">
+      <keyword>true</keyword>
+      <keyword>false</keyword>
+    </context>
+
+    <context id="ebasic" class="no-spell-check">
+      <include>
+        <context ref="doc-comment"/>
+        <context ref="line-comment"/>
+        <context ref="string"/>
+        <context ref="preprocessor"/>
+        <context ref="keywords"/>
+        <context ref="types"/>
+        <context ref="boolean"/>
+        <context ref="def:decimal"/>
+        <context ref="def:float"/>
+      </include>
+    </context>
+
+  </definitions>
+
+</language>

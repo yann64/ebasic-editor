@@ -10,8 +10,26 @@ completion, `ebpm` for build/run/test, and real `git` integration.
 ## Status
 
 Early development, Linux-only (matching `eb-gtk4`'s own current scope). A
-single window with a `GtkSourceView` - no file I/O, syntax highlighting,
-LSP, `ebpm`, or `git` integration yet; each lands in its own slice.
+single window with a `GtkSourceView` and a real eBasic syntax-highlighting
+definition (`data/language-specs/ebasic.lang`) - no file I/O, LSP, `ebpm`,
+or `git` integration yet; each lands in its own slice.
+
+## Syntax highlighting
+
+`data/language-specs/ebasic.lang` is a real GtkSourceView language-spec
+file for eBasic (keywords/types/booleans/comments/doc-comments/
+preprocessor directives/strings, all pulled from the real lexer's own
+keyword table, not guessed) - loaded via a custom search path (this
+repo's own directory), no system install needed:
+
+```basic
+DIM mgr AS SourceLanguageManager
+mgr = SourceLanguageManagerGetDefault()
+CALL SourceLanguageManagerAppendSearchPath(mgr, "data/language-specs")
+
+DIM lang AS SourceLanguage
+lang = SourceLanguageManagerGetLanguage(mgr, "ebasic")
+```
 
 ## Building
 
