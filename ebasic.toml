@@ -1,0 +1,11 @@
+[package]
+name = "ebasic-editor"
+version = "0.1.0"
+
+[bin]
+name = "ebasic-editor"
+path = "src/main.bas"
+
+[dependencies]
+gtk4 = "^0.2"
+eb-cjson = "^0.1"
