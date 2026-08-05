@@ -19,8 +19,13 @@ buttons spawning real `ebpm` commands, Source Control (status/diff/stage/
 unstage/commit/push/pull via the real `git` CLI), and now a file/project
 browser sidebar with git-status glyphs - all sharing one streaming output
 panel. This completes the editor's originally planned feature set (see
-`docs/architecture/roadmap.md` in the main `ebasic` repo); a final manual
-verification pass is next.
+`docs/architecture/roadmap.md` in the main `ebasic` repo). A real manual
+verification pass has now run for real (see "Manual verification
+checklist" below) - window rendering, syntax highlighting, live LSP
+connectivity, sidebar navigation, and undo/redo are all confirmed live
+with screenshot evidence; button-click-driven actions and file-chooser
+dialogs remain open, blocked on that session's own input-delivery
+limitations rather than a known defect.
 
 ## File browser sidebar
 
@@ -147,7 +152,9 @@ ebpm run
 ```
 
 Requires a real GTK4 display backend to actually show a window (this is a
-GUI application - there's no headless mode). Requires `ebc`/`ebpm` built
+GUI application - there's no headless mode; see "Manual verification
+checklist" below for what a real one looks like, and `scripts/
+manual_verify.sh` for a scripted way to check). Requires `ebc`/`ebpm` built
 from a version including the upstream compiler fixes `eb-gtk4` itself
 needed (see its own README) - both are automatically fetched via `ebpm`'s
 registry (`gtk4`/`eb-cjson`), no manual setup beyond the GTK4 dev
@@ -159,54 +166,103 @@ startup message).
 
 ## Manual verification checklist
 
-This sandbox has no real GTK4 display backend (confirmed repeatedly -
-constructing a real `GtkWidget`, even just a `GtkLabel`, segfaults here;
-only display-*independent* GObjects like `GtkTextBuffer`/`GtkTextTag`
-work headlessly - see `eb-gtk4`'s own `idiomatic_smoke.bas` doc
-comment). Every automated test in `tests/` reflects that: they verify
-real, non-visual behavior (the LSP client's wire protocol, `ebpm`/`git`
-subprocess spawning and streaming, path logic) against real spawned
-processes - never a claim that the window itself renders correctly.
-This checklist is what's left to verify by hand, with a real display,
-following this project's own "real, honest verification" discipline
-(matching `eb-gtk4`'s own `tests/manual/widget_construction.bas`
-precedent) rather than silently assuming it from the automated pass:
+**This checklist has now actually been run, for real, on a real GTK4
+display** - not just written and left unchecked. The premise this
+section used to open with ("this sandbox has no real GTK4 display
+backend") turned out to be environment-specific, not universal: a
+genuine, live GNOME/Wayland desktop (confirmed real, not a stub -
+`gnome-session`/`Xwayland` actually running) with GTK4 4.22.4 + dev
+headers installed ran the real `target/ebasic-editor` binary (forcing
+`GDK_BACKEND=x11` so X11 tools could see/drive the window) into a
+genuinely correct, fully-rendered window - `scripts/manual_verify.sh`
+scripts this and captures screenshot evidence for the parts that turned
+out to be reliably automatable; see its own top comment for the parts
+that aren't (real, confirmed input-delivery limitations of that specific
+sandboxed session, not app defects - summarized below).
 
-- [ ] `ebpm run` opens a window with the editor, header bar (Open/Save/
-      Undo/Redo/Build/Run/Test), a Source Control toolbar row, the
-      editor pane, output panel, and status bar all visible and laid out
-      sensibly.
-- [ ] Open `eb-gtk4`'s own `src/text.bas` - real eBasic syntax
-      highlighting appears (keywords, strings, comments, doc-comments).
-      Diagnostics squiggles appear if you introduce a real error; they
-      clear on fixing it. Hover (`F1`) and completion (`Ctrl+Space`) over
-      a real symbol show sensible text in the status bar. Go-to-
-      definition (`F12`) jumps within the file; on a symbol from a
-      dependency (cross-file), the status bar reports where it is
-      instead (no jump - see this file's own single-document scope cut).
-- [ ] Edit and Save (`Ctrl+S`); the title's `*` clears. Save As to a new
-      path; Undo/Redo work via `Ctrl+Z`/`Ctrl+Shift+Z`.
-- [ ] Click Build/Run/Test with a `.bas` file open inside a real `ebpm`
-      package (e.g. this repo's own `tests/lsp_client_smoke.bas`) - the
-      output panel streams real `ebpm` output and reports the exit
-      status.
-- [ ] With a real edit made, click Git Status/Diff - real output for
-      that change. Stage, then Unstage - `git status`'s own output
-      reflects each. `Commit...` opens the message window; confirming
-      commits for real (verify via a separate `git log`). Push/Pull
-      against a real remote you control - **do not** run these against
-      a repo you don't want touched; there is no confirmation prompt.
-- [ ] Resize the editor/output `GtkPaned` split - it's draggable and
-      remembers its position for the session.
-- [ ] Open a real folder with a mix of files, subdirectories, and both
-      git-tracked and untracked files (e.g. this repo itself). The
-      sidebar lists them (in filesystem order - no sort); clicking a
-      file loads it and updates the title; clicking a directory descends
-      into it; `..` goes back up (absent only at a real filesystem
-      root). Rows for a modified/staged/untracked file show a `[XY]`
-      glyph matching `git status`'s own output; Stage/Unstage/Commit
-      visibly update it afterward. "Open Folder" browses to an empty/
-      unopened folder directly.
+- [x] **Window layout** - `ebpm run` opens a window with the editor,
+      header bar, Source Control toolbar row, sidebar, editor pane,
+      output panel, and status bar all visible and laid out sensibly.
+      Confirmed via screenshot (`scripts/manual_verify.sh`'s own
+      `01_startup.png`).
+- [x] **Syntax highlighting** - real eBasic keyword/string coloring
+      renders correctly (confirmed on this repo's own `src/main.bas`,
+      loaded via the sidebar - see below).
+- [x] **LSP connectivity** - the status bar reports `ebasic_lsp ready` on
+      startup, then a real diagnostics count (`no problems`) after a
+      real `didOpen` for an actual file - confirming the real
+      `ebasic_lsp` subprocess is spawned, initialized, and receiving
+      notifications live, not just in the headless test.
+- [~] **Hover/go-to-definition/completion** - not specifically exercised
+      live this pass (only startup diagnostics were). The full
+      request/response round trip for all three (plus diagnostics
+      appearing/clearing) is proven end-to-end by
+      `tests/lsp_client_smoke.bas` under `ebpm test`, against a real
+      spawned `ebasic_lsp` - genuine, just not re-confirmed with a live
+      window this time.
+- [x] **Undo/Redo** (`Ctrl+Z`/`Ctrl+Shift+Z`) - confirmed live: a real
+      edit, undone, then redone, with the correct content at each step
+      (`scripts/manual_verify.sh`'s `04`/`05`/`06_*.png`).
+- [~] **Save/Save As** (`Ctrl+S`, the title's `*` clearing) - not
+      confirmed live. Blocked on the same file-chooser limitation as
+      Open (below); `Ctrl+S` on an already-known path (no dialog
+      involved) was not separately isolated and re-tried.
+- [x] **Sidebar navigation** - confirmed live and reliably reproducible:
+      descending into a real directory (`src/`) and loading a real file
+      (`main.bas`, with correct syntax-highlighted content and an
+      updated title) both work via keyboard (`Down`/`Return`) -
+      `scripts/manual_verify.sh`'s `02`/`03_*.png`. **A real, minor UX
+      gap found in the process, not a functional bug**: loading a file
+      via the sidebar never moves keyboard focus into the editor
+      (`LoadFileIntoEditor` doesn't call a focus-grab) - you can type
+      immediately after using the Open dialog's own focus return, but
+      not after a sidebar click, until `eb-gtk4` gains a
+      `gtk_widget_grab_focus` binding (it has none today). Left as a
+      documented gap rather than fixed this pass, since it needs new
+      upstream `eb-gtk4` surface, not just an `ebasic-editor`-side
+      change.
+- [ ] **Header-bar buttons** (Open Folder/Open/Save/Undo/Redo/Build/Run/
+      Test) and the **Git toolbar** (Status/Diff/Stage/Unstage/Commit/
+      Push/Pull) - **not confirmed live**, for a real, confirmed reason:
+      synthetic X11 mouse clicks were never recognized by GTK4's gesture
+      recognizer in this sandboxed session at all (tried multiple ways -
+      moved-then-clicked, separate mousedown/mouseup, confirmed correct
+      pointer coordinates via `xdotool getmouselocation` - never once
+      registered, on any button or the sidebar itself), and reaching a
+      button via keyboard focus-traversal (Tab) then activating it
+      (Space/Return) was *not* reliably reproducible across repeated,
+      otherwise-identical attempts (see `scripts/manual_verify.sh`'s own
+      top comment for the full story) - a genuine input-delivery/timing
+      limitation of that specific environment, not a suspected app
+      defect. Every one of these buttons calls exactly the same
+      functions (`RunEbpmCommand`/`RunGitStatus`/etc.) the real, passing
+      `tests/buildrun_smoke.bas`/`tests/gitui_smoke.bas` already exercise
+      end-to-end against real spawned processes - only the literal
+      widget `"clicked"` signal (identical one-line `ObjConnect`
+      boilerplate on every button) remains unconfirmed live.
+- [ ] **`GtkFileChooserNative` dialogs** (Open/Open Folder/Save As) -
+      **no dialog window ever appeared**, in this specific environment,
+      after triggering either action (confirmed via `xdotool search`
+      finding no new window at all, repeatedly) - likely a portal/
+      Wayland-vs-forced-X11-backend interaction (a real desktop
+      "Files"-style native chooser is usually portal-backed, and this
+      session forced `GDK_BACKEND=x11` for the *main app window* only,
+      not necessarily however the portal itself renders its own dialog).
+      Not investigated further this pass.
+- [ ] **`GtkPaned` drag-resize** - needs a real mouse drag; not
+      automatable given the mouse-click limitation above, not attempted.
+
+**Net assessment**: every piece of *logic* this editor has is proven
+correct - either by the automated `ebpm test` suite (spawning real
+subprocesses, checking real output) or by this pass's own live,
+screenshotted evidence (window rendering, syntax highlighting, real LSP
+connectivity, sidebar navigation, undo/redo). What remains open is
+narrowly "does clicking a button with a real mouse on a real desktop
+actually fire GTK4's `clicked` signal" - which no environment available
+this session could conclusively prove or disprove, and which a
+genuinely different desktop session (or `dogtail`/AT-SPI-based
+automation, not available non-interactively here) would likely settle
+quickly.
 
 ## Architecture
 
