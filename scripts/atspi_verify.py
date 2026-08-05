@@ -187,6 +187,44 @@ def is_focused(node):
     return node.get_state_set().contains(Atspi.StateType.FOCUSED)
 
 
+def find_value_nodes(node, acc=None):
+    """GtkPaned exposes its divider position via the AtkValue interface,
+    but its accessible role on this GTK4 build is plain 'panel' (role 39),
+    not 'split pane' as ATK's own convention might suggest. role_name==
+    'panel' + 'Value' alone still isn't enough once a file is loaded and
+    the SourceView's own scrollbars appear: each GtkScrollbar ('scroll
+    bar' role) has its OWN internal trough/slider child that is ALSO
+    exposed as role 'panel' with a 'Value' interface - so a real Paned
+    divider is specifically a Value-panel whose *parent* is NOT itself a
+    scroll bar."""
+    if acc is None:
+        acc = []
+    parent_role = None
+    try:
+        parent = node.get_parent()
+        if parent is not None:
+            parent_role = parent.get_role_name()
+    except Exception:
+        pass
+    try:
+        if (
+            node.get_role_name() == "panel"
+            and "Value" in node.get_interfaces()
+            and parent_role != "scroll bar"
+        ):
+            acc.append(node)
+        cc = node.get_child_count()
+    except Exception:
+        return acc
+    for i in range(cc):
+        try:
+            child = node.get_child_at_index(i)
+        except Exception:
+            continue
+        find_value_nodes(child, acc)
+    return acc
+
+
 def xdotool(*args):
     subprocess.run(["xdotool", *args])
 
@@ -256,6 +294,18 @@ def main():
         report(editor_node is not None, "found the editor's SourceView via AT-SPI")
         if editor_node is not None:
             report(is_focused(editor_node), "editor has real keyboard focus after a sidebar file-load (WidgetGrabFocus)")
+
+        print("==> GtkPaned drag-resize via the AT-SPI Value interface (no mouse drag needed)...")
+        value_nodes = find_value_nodes(app)
+        report(len(value_nodes) == 2, f"found both Paned dividers exposing AtkValue (got {len(value_nodes)})")
+        for idx, node in enumerate(value_nodes):
+            before = Atspi.Value.get_current_value(node)
+            vmax = Atspi.Value.get_maximum_value(node)
+            target = before + 50 if (vmax == 0 or before + 50 < vmax) else max(0, before - 50)
+            Atspi.Value.set_current_value(node, target)
+            time.sleep(0.3)
+            after = Atspi.Value.get_current_value(node)
+            report(after == target, f"Paned divider #{idx}: moved {before} -> {target} (real position now {after})")
 
     finally:
         proc.terminate()

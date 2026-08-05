@@ -292,33 +292,62 @@ sandboxed session, not app defects - summarized below).
       (`FOCUSED`, etc.) directly on this host - just not action dispatch,
       in this specific GTK4/at-spi2-core version combination.
 - [ ] **`GtkFileChooserNative` dialogs** (Open/Open Folder/Save As) -
-      **no dialog window ever appeared**, in this specific environment,
-      after triggering either action (confirmed via `xdotool search`
-      finding no new window at all, repeatedly) - likely a portal/
-      Wayland-vs-forced-X11-backend interaction (a real desktop
-      "Files"-style native chooser is usually portal-backed, and this
-      session forced `GDK_BACKEND=x11` for the *main app window* only,
-      not necessarily however the portal itself renders its own dialog).
-      Not investigated further this pass.
-- [ ] **`GtkPaned` drag-resize** - needs a real mouse drag; not
-      automatable given the mouse-click limitation above, not attempted.
+      **still blocked, but now confirmed to be the SAME root cause as the
+      header-bar button-click gap above, not a separate, new one**: since
+      no method tried so far can reliably *activate* a plain toolbar
+      `GtkButton` on this host (raw X11 clicks ignored; `Atspi.Action.
+      do_action` acknowledged but inert; `Atspi.Component.grab_focus()`
+      on the "Open" button fails outright with a real `atspi_error` at
+      the D-Bus protocol level, not just a no-op; keyboard `Tab`
+      traversal from the sidebar does not reliably reach the header
+      buttons at all - a scripted walk pressing `Tab` 25 times and
+      reading real AT-SPI `FOCUSED` state after each press never once
+      landed on any header-bar button, cycling back into sidebar list
+      items instead), the dialog-opening button can't be triggered by
+      any means tried, so whether the dialog itself would register with
+      AT-SPI remains unknown. No mnemonic/accelerator exists as a
+      bypass either (`NewButton("Open")` has no `_`-prefixed underline
+      letter - only the *dialog's own* Save/Cancel buttons do, and the
+      dialog never appears to expose them). Not a defect in this
+      project; not investigated further this pass given it's the same
+      wall as the button-click gap, which already has a real, positive
+      cross-version finding (see above) pointing at the actual fix
+      needed (an updated/older GTK4 stack, or an upstream fix).
+- [x] **`GtkPaned` drag-resize** - **confirmed working**, without any
+      mouse drag, via the AT-SPI `Value` interface: `GtkPaned` exposes
+      its divider position through `AtkValue` (`Atspi.Value.
+      get_current_value`/`set_current_value`), and calling
+      `set_current_value` on both real dividers (the sidebar|editor
+      split and the editor|output split) genuinely moves them -
+      confirmed both by reading the new value back and by a screenshot
+      showing the sidebar visibly wider after the call. One real gotcha
+      found along the way: this GTK4 build's `GtkPaned` exposes an ATK
+      role of plain `"panel"` (not `"split pane"`, the ATK convention
+      one might expect), and worse, once a file is open, `GtkScrollbar`'s
+      own internal trough/slider is *also* exposed as role `"panel"`
+      with a `Value` interface - so finding the real dividers requires
+      filtering on `role_name == "panel"` **and** `"Value" in
+      get_interfaces()` **and** the node's own parent not itself being a
+      `"scroll bar"`. Automated in `scripts/atspi_verify.py`.
 
 **Net assessment**: every piece of *logic* this editor has is proven
 correct - either by the automated `ebpm test` suite (spawning real
 subprocesses, checking real output) or by these two passes' own live
 evidence (window rendering, syntax highlighting, real LSP connectivity,
-sidebar navigation + the focus-grab fix, undo/redo - screenshots plus
-real AT-SPI state reads, not screen-scraping guesses). What remains open
-is narrowly "does clicking a button with a real mouse on a real desktop
-actually fire GTK4's `clicked` signal" - and this session's cross-version
-Docker test resolved the *nature* of the gap even though it doesn't fix
-it here: it's a genuine regression in this host's specific GTK4/
-at-spi2-core/python3-gi version combination (confirmed working correctly
-on an older, real combination), not a fundamental limitation of AT-SPI-
-based automation, and not a defect in this project. AT-SPI structural/
-state introspection (`scripts/atspi_verify.py`) is a real, working,
-permanent addition to this project's own verification toolkit regardless
-of this gap.
+sidebar navigation + the focus-grab fix, undo/redo, `GtkPaned`
+drag-resize - screenshots plus real AT-SPI state/value reads, not
+screen-scraping guesses). What remains open is narrowly "does activating
+a plain `GtkButton` (by mouse or otherwise) actually fire GTK4's
+`clicked` signal" (blocking both the header/Git-toolbar buttons and,
+transitively, the file-chooser dialogs they'd open) - and this session's
+cross-version Docker test resolved the *nature* of that gap even though
+it doesn't fix it here: it's a genuine regression in this host's
+specific GTK4/at-spi2-core/python3-gi version combination (confirmed
+working correctly on an older, real combination), not a fundamental
+limitation of AT-SPI-based automation, and not a defect in this project.
+AT-SPI structural/state/value introspection (`scripts/atspi_verify.py`)
+is a real, working, permanent addition to this project's own
+verification toolkit regardless of this one remaining gap.
 
 ## Architecture
 
