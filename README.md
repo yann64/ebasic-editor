@@ -143,13 +143,29 @@ in the main `ebasic` repo) - the wire format itself is built with
   Return inserting the full word) - several reasonable attempts via
   synthetic X11 key events (immediate accept, an explicit `Down` to
   select first, various timings) either fell through to ordinary text
-  editing or were silently swallowed with no insertion, in this sandboxed
-  session specifically. This may be the same broad class of
-  input-delivery limitation this session's other GUI-automation work
-  already found (real mouse clicks and some AT-SPI action dispatch paths
-  are also unreliable here) rather than a defect in `GtkSourceCompletion`
-  itself (real, widely-used library code, not something this project
-  wrote) - left as an honest, open item for a real keyboard/session.
+  editing or were silently swallowed with no insertion. A same-session
+  follow-up investigation tried to isolate this the same way the
+  button-click regression was isolated earlier (a minimal, standalone
+  PyGObject reproduction of the identical `GtkSourceCompletionWords`
+  setup, tested against both this host's `gtksourceview-5` 5.18.0 and an
+  older 5.6.2 in a disposable Docker container) - but that minimal
+  reproduction **never got the popup to even show at all** (via an
+  explicit `completion.show()` call) on *either* version, ruling out a
+  simple version regression as the explanation for this specific gap
+  (unlike the button-click one, where the cross-version test gave a
+  clean, definitive answer). Tried varying several structural details in
+  the minimal repro (wrapping the view in a `GtkScrolledWindow`, giving
+  the buffer a real `GtkSourceLanguage`, much longer warm-up waits) -
+  none reproduced the popup showing there either, so there's something
+  about `ebasic-editor`'s own real setup this minimal repro isn't
+  capturing, not yet identified. In the real app itself, real X11
+  keyboard focus stays on the main window throughout (confirmed via
+  `xdotool getwindowfocus`) - it never moves to the popup's own separate
+  window - which is consistent with, but doesn't fully explain, Return/
+  Tab not being intercepted as an accept. Left as a genuinely open,
+  investigated-but-unresolved item, not a defect assumed in
+  `GtkSourceCompletion` itself (real, widely-used library code, not
+  something this project wrote).
 - **Single-document scope**: a `publishDiagnostics` for a file other than
   the one currently open (e.g. an `#include`d file) isn't rendered
   inline; a go-to-definition landing in a different file reports where
