@@ -117,14 +117,39 @@ in the main `ebasic` repo) - the wire format itself is built with
   rendered as a real `GtkTextTag` squiggle (`PANGO_UNDERLINE_ERROR`/
   `_SINGLE`, see `gtk4`'s own `TextBufferCreateUnderlineTag` - added
   specifically for this), plus a problem count in the status bar.
-- **Hover** (`F1`), **go-to-definition** (`F12`), and **completion**
-  (`Ctrl+Space`) all show their result in the status bar - not an
-  interactive tooltip/popover/completion-list popup. This is a
-  deliberate v1 scope cut: `gtk4` has no tooltip-forcing or popover
-  bindings yet, and building one specifically for this would be new,
+- **Hover** (`F1`) and **go-to-definition** (`F12`) show their result in
+  the status bar - not an interactive tooltip/popover. This is a
+  deliberate scope cut: `gtk4` has no tooltip-forcing/popover bindings
+  yet, and building one specifically for these would be new,
   unverifiable-in-this-sandbox GTK surface rather than reusing what
-  already exists. Completion in particular just prints the (up to 8)
-  candidate labels as text to type from, not something to click.
+  already exists.
+- **Completion is a real, live-as-you-type popup**, not status-bar text:
+  `gtk4`'s `SourceCompletion`/`SourceCompletionWords` bindings (a
+  ready-made `GtkSourceCompletionProvider`, no custom GObject-interface
+  implementation needed) are registered against a hidden, never-shown
+  `TextBuffer` that `lsp.bas` keeps refreshed in the background with
+  every known keyword/procedure/struct/symbol name (`LspRefreshCompletion
+  Words`, fired automatically after every `didOpen`/`didChange` -
+  fire-and-forget, tracked by its own response id so it can't race a
+  concurrent hover/go-to-definition request - see `lsp.bas`'s own doc
+  comments). `Ctrl+Space` force-shows the popup on demand on top of that.
+  **Confirmed live**: the popup genuinely renders with a real candidate
+  (screenshotted mid-session, typing "PRI" after loading a file showed a
+  real dropdown with "PRINT"), and the background refresh mechanism is
+  proven end-to-end by `tests/lsp_client_smoke.bas` (a real spawned
+  `ebasic_lsp` round trip populates the hidden buffer with both a
+  keyword and a variable this test's own document declares). **Not yet
+  confirmed live**: keyboard-driven *acceptance* of a candidate (Tab/
+  Return inserting the full word) - several reasonable attempts via
+  synthetic X11 key events (immediate accept, an explicit `Down` to
+  select first, various timings) either fell through to ordinary text
+  editing or were silently swallowed with no insertion, in this sandboxed
+  session specifically. This may be the same broad class of
+  input-delivery limitation this session's other GUI-automation work
+  already found (real mouse clicks and some AT-SPI action dispatch paths
+  are also unreliable here) rather than a defect in `GtkSourceCompletion`
+  itself (real, widely-used library code, not something this project
+  wrote) - left as an honest, open item for a real keyboard/session.
 - **Single-document scope**: a `publishDiagnostics` for a file other than
   the one currently open (e.g. an `#include`d file) isn't rendered
   inline; a go-to-definition landing in a different file reports where
@@ -220,13 +245,19 @@ sandboxed session, not app defects - summarized below).
       real `didOpen` for an actual file - confirming the real
       `ebasic_lsp` subprocess is spawned, initialized, and receiving
       notifications live, not just in the headless test.
-- [~] **Hover/go-to-definition/completion** - not specifically exercised
-      live this pass (only startup diagnostics were). The full
-      request/response round trip for all three (plus diagnostics
-      appearing/clearing) is proven end-to-end by
-      `tests/lsp_client_smoke.bas` under `ebpm test`, against a real
-      spawned `ebasic_lsp` - genuine, just not re-confirmed with a live
-      window this time.
+- [~] **Hover/go-to-definition** - not specifically exercised live this
+      pass (only startup diagnostics were). The full request/response
+      round trip (plus diagnostics appearing/clearing) is proven
+      end-to-end by `tests/lsp_client_smoke.bas` under `ebpm test`,
+      against a real spawned `ebasic_lsp` - genuine, just not
+      re-confirmed with a live window this time.
+- [x] **Completion popup** - confirmed live: typing a partial keyword
+      after loading a real file showed a genuine `GtkSourceCompletion`
+      dropdown with a real candidate (screenshotted). The background
+      refresh that keeps it current is proven end-to-end by
+      `tests/lsp_client_smoke.bas`. Keyboard-driven *acceptance* of a
+      candidate specifically wasn't confirmed live this pass (see
+      "Editing" section above) - an honest, open item, not claimed done.
 - [x] **Undo/Redo** (`Ctrl+Z`/`Ctrl+Shift+Z`) - confirmed live: a real
       edit, undone, then redone, with the correct content at each step
       (`scripts/manual_verify.sh`'s `04`/`05`/`06_*.png`).

@@ -10,11 +10,15 @@
 ' notifications (one per touched file, including #include'd ones - see
 ' the LSP's own diagnostics_test.sh), so this client reads *continuously*:
 ' every message triggers LspDispatch, which either updates the UI right
-' away (a notification) or resolves whatever the one outstanding client-
-' initiated request was (hover/definition/completion - this editor never
-' has more than one in flight at a time, matching its own single-
-' document-editing scope) - then always re-arms the next async header
-' read, a self-perpetuating chain that runs for the whole process's
+' away (a notification), resolves whatever the one outstanding client-
+' initiated request was (hover/definition - this editor never has more
+' than one of *these* in flight at a time, matching its own single-
+' document-editing scope), or - checked first, independent of that
+' single-slot scheme - resolves a background completion-words refresh
+' (see gLspCompletionRefreshId), which genuinely can be in flight
+' alongside a hover/definition request without either interfering with
+' the other. LspDispatch always re-arms the next async header read
+' afterwards, a self-perpetuating chain that runs for the whole process's
 ' lifetime. initialize/shutdown are the only synchronous-feeling calls
 ' (a brief `g_main_context_iteration` pump loop) - acceptable since they
 ' each happen once, at startup/teardown.
@@ -49,15 +53,37 @@ DIM gLspLastStatus AS STRING
 DIM gLspErrorTag AS ANY PTR
 DIM gLspWarningTag AS ANY PTR
 
+' The hidden, never-shown TextBuffer completion candidates are kept in
+' (see LspHandleCompletionResponse) - a real GtkSourceCompletionWords
+' provider registered against it does the actual popup/filtering/
+' insertion work (see main.bas's own wiring). gLspCompletion is the
+' editor's real GtkSourceCompletion controller, used only to force-show
+' the popup on demand (LspTriggerCompletionPopup) - left at its
+' zero-handle default in a headless test, which never calls that.
+DIM gLspCompletionWordsBuf AS TextBuffer
+DIM gLspCompletion AS SourceCompletion
+
 DIM gLspDocUri AS STRING
 DIM gLspDocVersion AS INTEGER
 DIM gLspDocOpen AS INTEGER
 
 ' At most one outstanding client-initiated request at a time - matches
 ' this editor's own single-document, single-in-flight-request scope.
-' 0 = none, 1 = hover, 2 = definition, 3 = completion, 4 = initialize,
-' 5 = shutdown.
+' 0 = none, 1 = hover, 2 = definition, 4 = initialize, 5 = shutdown.
+' (3 - completion - used to live here too, back when Ctrl+Space blocked
+' waiting for its own response; completion candidates now refresh in the
+' background instead - see gLspCompletionRefreshId - so this single-slot
+' scheme no longer needs to represent it at all.)
 DIM gLspPendingKind AS INTEGER
+
+' The id of an in-flight background completion-words refresh request (see
+' LspRefreshCompletionWords), or -1 if none is outstanding. Tracked
+' separately from gLspPendingKind/the DO-WHILE-blocking request scheme
+' above precisely because this one must NOT block and must NOT be able to
+' clobber (or be clobbered by) a concurrent user-triggered hover/
+' definition request - LspDispatch checks a response's own "id" against
+' this before ever consulting gLspPendingKind.
+DIM gLspCompletionRefreshId AS INTEGER
 
 ''' Bumped every time a publishDiagnostics notification for the current
 ''' document is processed - notifications have no id to wait on the way a
@@ -156,15 +182,15 @@ SUB LspSendNotification(BYVAL method AS STRING, BYVAL params AS JsonValue)
     CALL JsonFree(msg)
 END SUB
 
-''' Sends a request and marks `kind` as the one outstanding client-
-''' initiated request (see this file's own top doc comment) - returns the
-''' id used (not currently read back by any caller, but kept for
-''' completeness/future use).
-FUNCTION LspSendRequest(BYVAL method AS STRING, BYVAL params AS JsonValue, kind AS INTEGER) AS INTEGER
+''' Sends a request with a fresh id and returns it - does NOT touch
+''' gLspPendingKind, so a caller that doesn't want to participate in the
+''' single-outstanding-request DO-WHILE-blocking scheme at all (see
+''' gLspCompletionRefreshId) can send one safely alongside it. Ordinary
+''' request-sending code should use LspSendRequest instead.
+FUNCTION LspSendRequestRaw(BYVAL method AS STRING, BYVAL params AS JsonValue) AS INTEGER
     DIM id AS INTEGER
     id = gLspNextId
     gLspNextId = gLspNextId + 1
-    gLspPendingKind = kind
 
     DIM msg AS JsonValue
     msg = JsonNewObject()
@@ -175,6 +201,17 @@ FUNCTION LspSendRequest(BYVAL method AS STRING, BYVAL params AS JsonValue, kind 
     CALL LspWriteFramed(msg)
     CALL JsonFree(msg)
 
+    LspSendRequestRaw = id
+END FUNCTION
+
+''' Sends a request and marks `kind` as the one outstanding client-
+''' initiated request (see this file's own top doc comment) - returns the
+''' id used (not currently read back by any caller, but kept for
+''' completeness/future use).
+FUNCTION LspSendRequest(BYVAL method AS STRING, BYVAL params AS JsonValue, kind AS INTEGER) AS INTEGER
+    DIM id AS INTEGER
+    id = LspSendRequestRaw(method, params)
+    gLspPendingKind = kind
     LspSendRequest = id
 END FUNCTION
 
@@ -314,46 +351,37 @@ SUB LspHandleDefinitionResponse(BYVAL msg AS JsonValue)
     CALL LspSetStatus("jumped to definition")
 END SUB
 
+''' Refreshes the hidden completion-words buffer (see
+''' gLspCompletionWordsBuf's own doc comment) with every candidate this
+''' response carries - GtkSourceCompletionWords does its own fuzzy/prefix
+''' filtering locally against whatever's in that buffer, so this just
+''' needs the full, current set of known names, space-separated (any
+''' whitespace-delimited layout works - the provider extracts distinct
+''' words from the buffer's text itself; a plain space, unlike a newline,
+''' needs no CHR$-equivalent workaround - eBasic's STRING literals have no
+''' escape syntax at all yet, see docs/reference/types-and-literals.md).
 SUB LspHandleCompletionResponse(BYVAL msg AS JsonValue)
     DIM result AS JsonValue
     result = JsonObjectGet(msg, "result")
     IF JsonIsValid(result) = 0 OR JsonIsArray(result) = 0 THEN
-        CALL LspSetStatus("no completions")
         EXIT SUB
     END IF
 
     DIM n AS INTEGER
     n = JsonArrayLen(result)
-    IF n = 0 THEN
-        CALL LspSetStatus("no completions")
-        EXIT SUB
-    END IF
-
-    ' Completion candidates are shown as text in the status bar, not an
-    ' interactive insertable popup - a deliberate v1 scope cut (see
-    ' README.md) rather than a half-built popover/list-window UI this
-    ' sandbox has no way to visually verify at all.
-    DIM shown AS INTEGER
-    shown = n
-    IF shown > 8 THEN
-        shown = 8
-    END IF
 
     DIM text AS STRING
     text = ""
     DIM i AS INTEGER
-    FOR i = 0 TO shown - 1
+    FOR i = 0 TO n - 1
         DIM candidateLabel AS STRING
         candidateLabel = JsonGetString(JsonObjectGet(JsonArrayGet(result, i), "label"))
         IF i > 0 THEN
-            text = text & ", "
+            text = text & " "
         END IF
         text = text & candidateLabel
     NEXT i
-    IF shown < n THEN
-        text = text & ", ..."
-    END IF
-    CALL LspSetStatus(text)
+    CALL TextBufferSetText(gLspCompletionWordsBuf, text)
 END SUB
 
 SUB LspDispatch(BYVAL msg AS JsonValue)
@@ -368,13 +396,26 @@ SUB LspDispatch(BYVAL msg AS JsonValue)
         EXIT SUB
     END IF
 
+    ' A background completion-words refresh (see gLspCompletionRefreshId's
+    ' own doc comment) is tracked by its own response id, completely
+    ' independent of gLspPendingKind's single-slot scheme below - checked
+    ' first so it can never be misrouted by, or clobber, a concurrent
+    ' hover/definition request.
+    IF gLspCompletionRefreshId <> -1 THEN
+        DIM respId AS INTEGER
+        respId = JsonGetNumber(JsonObjectGet(msg, "id"))
+        IF respId = gLspCompletionRefreshId THEN
+            CALL LspHandleCompletionResponse(msg)
+            gLspCompletionRefreshId = -1
+            EXIT SUB
+        END IF
+    END IF
+
     SELECT CASE gLspPendingKind
     CASE 1
         CALL LspHandleHoverResponse(msg)
     CASE 2
         CALL LspHandleDefinitionResponse(msg)
-    CASE 3
-        CALL LspHandleCompletionResponse(msg)
     END SELECT
     gLspPendingKind = 0
 END SUB
@@ -454,33 +495,44 @@ SUB OnLspBody(source AS GObj PTR, res AS ANY PTR, data AS ANY PTR)
 END SUB
 
 ''' Shared setup for LspInit/LspInitHeadless.
-SUB LspInitCommon(buf AS SourceBuffer)
+SUB LspInitCommon(buf AS SourceBuffer, completionWordsBuf AS TextBuffer)
     gLspBuf = buf
+    gLspCompletionWordsBuf = completionWordsBuf
     gLspErrorTag = TextBufferCreateUnderlineTag(buf, "lsp-error", PANGO_UNDERLINE_ERROR)
     gLspWarningTag = TextBufferCreateUnderlineTag(buf, "lsp-warning", PANGO_UNDERLINE_SINGLE)
     gLspDocOpen = 0
     gLspPendingKind = 0
+    gLspCompletionRefreshId = -1
     gLspRunning = 0
 END SUB
 
 ''' Stashes the widgets LSP results are rendered into - call once, before
-''' LspStart.
-SUB LspInit(buf AS SourceBuffer, statusLabel AS Label)
-    CALL LspInitCommon(buf)
+''' LspStart. `completionWordsBuf` is the hidden buffer a real
+''' GtkSourceCompletionWords provider is registered against (see
+''' main.bas's own wiring) - refreshed automatically as the document
+''' changes (see LspRefreshCompletionWords). `completion` is the editor's
+''' real GtkSourceCompletion controller, used only so Ctrl+Space can
+''' force-show the popup on demand (LspTriggerCompletionPopup).
+SUB LspInit(buf AS SourceBuffer, statusLabel AS Label, completionWordsBuf AS TextBuffer, completion AS SourceCompletion)
+    CALL LspInitCommon(buf, completionWordsBuf)
     gLspStatusLabel = statusLabel
     gLspHasStatusLabel = 1
+    gLspCompletion = completion
 END SUB
 
-''' The same as LspInit, but with no status-bar widget - GtkLabel (like
-''' every real GtkWidget) needs an actual GTK4 display backend to
-''' construct at all, which this sandbox's automated tests don't have
-''' (see eb-gtk4's own idiomatic_smoke.bas doc comment); LspSetStatus
-''' still records the latest status text (see gLspLastStatus), just
-''' without a widget to also push it into - what tests/lsp_client_smoke.bas
-''' uses to verify the whole client end to end, headlessly, against a
-''' real spawned ebasic_lsp.
-SUB LspInitHeadless(buf AS SourceBuffer)
-    CALL LspInitCommon(buf)
+''' The same as LspInit, but with no status-bar widget or real completion
+''' popup controller - GtkLabel/GtkSourceView (like every real GtkWidget)
+''' need an actual GTK4 display backend to construct at all, which this
+''' sandbox's automated tests don't have (see eb-gtk4's own
+''' idiomatic_smoke.bas doc comment); LspSetStatus still records the
+''' latest status text (see gLspLastStatus), and the completion-words
+''' buffer (a plain TextBuffer, needs no display) still gets refreshed
+''' normally - just with no controller to also show a live popup with,
+''' and no LspTriggerCompletionPopup call expected. What
+''' tests/lsp_client_smoke.bas uses to verify the whole client end to
+''' end, headlessly, against a real spawned ebasic_lsp.
+SUB LspInitHeadless(buf AS SourceBuffer, completionWordsBuf AS TextBuffer)
+    CALL LspInitCommon(buf, completionWordsBuf)
     gLspHasStatusLabel = 0
 END SUB
 
@@ -508,6 +560,21 @@ SUB LspWaitForDiagUpdate(before AS INTEGER)
     DIM tries AS INTEGER
     tries = 0
     DO WHILE gLspDiagUpdateCount = before AND tries < 20
+        CALL g_main_context_iteration(0, -1)
+        tries = tries + 1
+    LOOP
+END SUB
+
+''' Blocks (bounded, up to 20 iterations) until the background completion-
+''' words refresh triggered by the most recent didOpen/didChange has been
+''' processed (gLspCompletionRefreshId reset to -1 - see
+''' LspRefreshCompletionWords/LspDispatch) - same reasoning as
+''' LspWaitForDiagUpdate, for the other async, fire-and-forget path this
+''' file now has.
+SUB LspWaitForCompletionRefresh()
+    DIM tries AS INTEGER
+    tries = 0
+    DO WHILE gLspCompletionRefreshId <> -1 AND tries < 20
         CALL g_main_context_iteration(0, -1)
         tries = tries + 1
     LOOP
@@ -596,6 +663,8 @@ SUB LspDidOpen(BYVAL uri AS STRING, BYVAL text AS STRING)
     params = JsonNewObject()
     CALL JsonSetField(params, "textDocument", textDoc)
     CALL LspSendNotification("textDocument/didOpen", params)
+
+    CALL LspRefreshCompletionWords()
 END SUB
 
 ''' Reports the document's full new content - a notification only (no
@@ -625,6 +694,8 @@ SUB LspDidChange(BYVAL text AS STRING)
     CALL JsonSetField(params, "textDocument", textDoc)
     CALL JsonSetField(params, "contentChanges", changes)
     CALL LspSendNotification("textDocument/didChange", params)
+
+    CALL LspRefreshCompletionWords()
 END SUB
 
 SUB LspDidClose()
@@ -695,7 +766,13 @@ SUB LspRequestDefinition(line AS INTEGER, col AS INTEGER)
     LOOP
 END SUB
 
-SUB LspRequestCompletion(line AS INTEGER, col AS INTEGER)
+''' Fire-and-forget: asks the server for the current, full set of known
+''' completion candidates and refreshes the hidden completion-words
+''' buffer once the response arrives (see LspHandleCompletionResponse,
+''' gLspCompletionRefreshId) - no blocking wait, safe to call on every
+''' keystroke (see LspDidChange) alongside a concurrent user-triggered
+''' hover/definition request without either interfering with the other.
+SUB LspRefreshCompletionWords()
     IF gLspDocOpen = 0 THEN
         EXIT SUB
     END IF
@@ -705,18 +782,26 @@ SUB LspRequestCompletion(line AS INTEGER, col AS INTEGER)
     CALL JsonSetField(textDoc, "uri", JsonNewString(gLspDocUri))
     DIM position AS JsonValue
     position = JsonNewObject()
-    CALL JsonSetField(position, "line", JsonNewNumber(line))
-    CALL JsonSetField(position, "character", JsonNewNumber(col))
+    ' The server's own completionItems() (lsp/src/symbols.cpp) doesn't
+    ' actually use the position yet - it returns every known name
+    ' unconditionally - but the real cursor position is passed anyway,
+    ' both because it's the semantically correct thing to send for this
+    ' request and in case the server later starts using it.
+    CALL JsonSetField(position, "line", JsonNewNumber(TextBufferGetCursorLine(gLspBuf)))
+    CALL JsonSetField(position, "character", JsonNewNumber(TextBufferGetCursorColumn(gLspBuf)))
 
     DIM params AS JsonValue
     params = JsonNewObject()
     CALL JsonSetField(params, "textDocument", textDoc)
     CALL JsonSetField(params, "position", position)
-    CALL LspSendRequest("textDocument/completion", params, 3)
+    gLspCompletionRefreshId = LspSendRequestRaw("textDocument/completion", params)
+END SUB
 
-    DO WHILE gLspPendingKind = 3 AND gLspRunning <> 0
-        CALL g_main_context_iteration(0, -1)
-    LOOP
+''' Forces the completion popup to show immediately, regardless of
+''' whether anything's been typed yet - the usual "show suggestions now"
+''' affordance on top of live-as-you-type triggering (Ctrl+Space).
+SUB LspTriggerCompletionPopup()
+    CALL SourceCompletionShow(gLspCompletion)
 END SUB
 
 ''' Shuts the server down cleanly (shutdown request, then exit

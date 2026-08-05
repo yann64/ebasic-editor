@@ -1,16 +1,18 @@
 ' Smoke test: the LSP client (src/lsp.bas) driving a real, spawned
-' ebasic_lsp end to end - display-independent (GtkSourceBuffer/GtkTextTag
-' never render anything themselves and need no GTK4 display backend to
-' construct, unlike a real GtkWidget - see eb-gtk4's own
-' idiomatic_smoke.bas doc comment on why this test uses LspInitHeadless,
-' not LspInit, to avoid constructing a real GtkLabel; this file also
-' drives GLib's own main loop by hand via g_main_context_iteration, no
-' GtkApplication/window needed at all), so this runs safely under `ebpm
-' test`. Exercises the full Content-Length-framed JSON-RPC round trip
-' against the real server binary: initialize, didOpen with a real Sema
-' error, the resulting publishDiagnostics rendering as a real GtkTextTag
-' application, a didChange that fixes it, hover, go-to-definition, and
-' completion.
+' ebasic_lsp end to end - display-independent (GtkSourceBuffer/GtkTextTag/
+' plain TextBuffer never render anything themselves and need no GTK4
+' display backend to construct, unlike a real GtkWidget - see eb-gtk4's
+' own idiomatic_smoke.bas doc comment on why this test uses
+' LspInitHeadless, not LspInit, to avoid constructing a real GtkLabel or
+' GtkSourceCompletion; this file also drives GLib's own main loop by hand
+' via g_main_context_iteration, no GtkApplication/window needed at all),
+' so this runs safely under `ebpm test`. Exercises the full
+' Content-Length-framed JSON-RPC round trip against the real server
+' binary: initialize, didOpen with a real Sema error, the resulting
+' publishDiagnostics rendering as a real GtkTextTag application, a
+' didChange that fixes it, hover, go-to-definition, and the background
+' completion-words refresh (LspRefreshCompletionWords, fired
+' automatically by didOpen/didChange - see lsp.bas's own doc comments).
 
 #include "gtk4.iface.bas"
 #include once "../src/lsp.bas"
@@ -18,7 +20,10 @@
 DIM buf AS SourceBuffer
 buf = NewSourceBuffer()
 
-CALL LspInitHeadless(buf)
+DIM completionWordsBuf AS TextBuffer
+completionWordsBuf = NewTextBuffer()
+
+CALL LspInitHeadless(buf, completionWordsBuf)
 
 DIM started AS INTEGER
 started = LspStart("ebasic_lsp")
@@ -63,11 +68,22 @@ PRINT gLspLastStatus
 PRINT TextBufferGetCursorLine(buf)
 PRINT TextBufferGetCursorColumn(buf)
 
-' Completion after "PRIN" (column 27..30 in "DIM x AS INTEGER : x = 5 :
-' PRINT x") - offering every reserved keyword/in-scope name (see
-' lsp.md's own LSP-6 notes), so PRINT itself is guaranteed present.
-CALL LspRequestCompletion(0, 27)
-PRINT gLspLastStatus
+' The completion-words buffer should already be populated by now (both
+' the didOpen above and the didChange fix each triggered their own
+' background LspRefreshCompletionWords) - wait for the most recent one to
+' finish, then confirm it holds every reserved keyword/in-scope name (see
+' lsp.md's own LSP-6 notes), so PRINT itself is guaranteed present, as is
+' the "x" variable this document itself declares.
+CALL LspWaitForCompletionRefresh()
+DIM rawWords AS ANY PTR
+rawWords = TextBufferGetText(completionWordsBuf)
+DIM wordsZ AS ZSTRING
+wordsZ = rawWords
+DIM words AS STRING
+words = wordsZ
+CALL FreeGMallocString(rawWords)
+PRINT INSTR(words, "PRINT") > 0
+PRINT INSTR(words, "x") > 0
 
 CALL LspStop()
 PRINT started

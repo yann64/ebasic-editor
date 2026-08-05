@@ -35,6 +35,8 @@ DIM gView AS SourceView
 DIM gCurrentPath AS STRING
 DIM gHasPath AS INTEGER
 DIM gStatusLabel AS Label
+DIM gCompletionWordsBuf AS TextBuffer
+DIM gCompletionProvider AS SourceCompletionWords
 
 ''' Sets the window title to the current file's name (or "Untitled"),
 ''' with a leading "*" while there are unsaved changes.
@@ -318,11 +320,13 @@ SUB OnGitPullClicked(btn AS GObj PTR, data AS ANY PTR)
     CALL RunGitPull(gHasPath, gCurrentPath)
 END SUB
 
-''' Ctrl+S saves; F1 shows hover info; F12 jumps to a definition; Ctrl+Space
-''' requests completion (all shown/acted on via lsp.bas - see its own
-''' LspRequestHover/Definition/Completion doc comments). Every other key
-''' is left to GtkSourceView's own default handling (including its
-''' built-in Ctrl+Z/Ctrl+Shift+Z undo/redo, which needs no wiring here).
+''' Ctrl+S saves; F1 shows hover info; F12 jumps to a definition;
+''' Ctrl+Space force-shows the completion popup right now (it already
+''' shows live, as you type, the moment the buffer has a matching
+''' candidate - see lsp.bas's own LspTriggerCompletionPopup doc comment).
+''' Every other key is left to GtkSourceView's own default handling
+''' (including its built-in Ctrl+Z/Ctrl+Shift+Z undo/redo, which needs no
+''' wiring here).
 FUNCTION OnKeyPressed(controller AS GObj PTR, keyval AS INTEGER, keycode AS INTEGER, state AS INTEGER, data AS ANY PTR) AS INTEGER
     DIM ctrlHeld AS INTEGER
     ctrlHeld = ((state AND GDK_CONTROL_MASK) <> 0)
@@ -337,7 +341,7 @@ FUNCTION OnKeyPressed(controller AS GObj PTR, keyval AS INTEGER, keycode AS INTE
         CALL LspRequestDefinition(TextBufferGetCursorLine(gBuf), TextBufferGetCursorColumn(gBuf))
         OnKeyPressed = 1
     ELSEIF keyval = GDK_KEY_space AND ctrlHeld THEN
-        CALL LspRequestCompletion(TextBufferGetCursorLine(gBuf), TextBufferGetCursorColumn(gBuf))
+        CALL LspTriggerCompletionPopup()
         OnKeyPressed = 1
     ELSE
         OnKeyPressed = 0
@@ -374,6 +378,17 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     keyCtrl = NewEventControllerKey()
     CALL ObjConnect(keyCtrl, "key-pressed", @OnKeyPressed, 0)
     CALL WidgetAddController(gView, keyCtrl)
+
+    ' A real, live-as-you-type completion popup, backed by a hidden buffer
+    ' (never shown by any view) that lsp.bas keeps refreshed with every
+    ' known keyword/procedure/struct/symbol name - see lsp.bas's own
+    ' LspRefreshCompletionWords/gLspCompletionWordsBuf doc comments.
+    gCompletionWordsBuf = NewTextBuffer()
+    gCompletionProvider = NewSourceCompletionWords("eBasic")
+    CALL SourceCompletionWordsRegister(gCompletionProvider, gCompletionWordsBuf)
+    DIM completion AS SourceCompletion
+    completion = SourceViewGetCompletion(gView)
+    CALL SourceCompletionAddProvider(completion, gCompletionProvider)
 
     DIM scroller AS ScrolledWindow
     scroller = NewScrolledWindow()
@@ -530,7 +545,7 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     gHasPath = 0
     CALL UpdateTitle()
 
-    CALL LspInit(gBuf, gStatusLabel)
+    CALL LspInit(gBuf, gStatusLabel, gCompletionWordsBuf, completion)
     IF LspStart("ebasic_lsp") = 0 THEN
         CALL LspSetStatus("ebasic_lsp not found on PATH - diagnostics/hover/go-to-definition/completion disabled")
     ELSEIF LspInitialize() = 0 THEN
