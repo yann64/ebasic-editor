@@ -18,19 +18,42 @@
 #
 # However, **`Atspi.Action.do_action` (e.g. "click" on a button) reports
 # success (`True`) at the D-Bus protocol level but was never observed to
-# produce any real application-level effect in this environment** -
-# tried repeatedly: on multiple different buttons, with the canonical
-# AT-SPI bus address looked up directly via `org.a11y.Bus.GetAddress`
-# and explicitly exported (`AT_SPI_BUS_ADDRESS`) to rule out a stale/
-# mismatched private bus, with long settle delays, and cross-checked
-# against a guard clause (`NoFileOpenGuard` in `gitui.bas`) that should
-# unconditionally rewrite the output panel's text the moment a Git
-# button's real "clicked" handler runs at all - it never did, not even
-# that. This is a second, separate, real input-delivery limitation of
-# this sandboxed session, additional to (not a fix for) the raw X11
+# produce any real application-level effect in this environment** - and
+# a follow-up dig root-caused this precisely to TWO distinct, separate
+# bugs, not one:
+#   1. `Atspi.Action.do_action()` (the Python/GI binding, called via
+#      either the instance method or the class-style `Atspi.Action.
+#      do_action(node, 0)`) never sends a real D-Bus method call AT ALL
+#      - confirmed via a live `dbus-monitor` on the real, canonical
+#      AT-SPI bus (looked up via `org.a11y.Bus.GetAddress`, exported as
+#      AT_SPI_BUS_ADDRESS for both processes to rule out a stale/
+#      mismatched private bus - a real pitfall, found separately, from
+#      ad hoc script runs accumulating many disconnected private bus
+#      sockets under /run/user/<uid>/at-spi2-*): only `org.a11y.atspi.
+#      Cache.AddAccessible` tree-registration broadcasts ever appear -
+#      never a `DoAction` method call from Python's own D-Bus connection.
+#   2. Calling the exact same real method DIRECTLY (bypassing Python/GI
+#      entirely) - via `busctl call <app's unique bus name> <button's own
+#      real per-widget object path, found via `busctl tree`/`get-
+#      property ... org.a11y.atspi.Accessible Name`> org.a11y.atspi.
+#      Action DoAction i 0` - genuinely DOES send the method call (this
+#      time visible on the `dbus-monitor` capture) and GTK4's own
+#      accessibility handler still just returns `true` with no real
+#      effect (checked visually - the button's own real handler, which
+#      would rewrite the output panel unconditionally per
+#      `NoFileOpenGuard` in `gitui.bas`, never runs).
+# So: (1) is a real bug/limitation in this specific `gi.repository.
+# Atspi` binding version for `Action.do_action` specifically (structural
+# introspection and state reads via the SAME binding work completely
+# fine - only this one call silently no-ops); (2) is a separate, real
+# limitation in GTK4's own accessibility-to-D-Bus action bridge (in this
+# GTK 4.22/4.23 build) - `DoAction` on a `GtkButton` is acknowledged but
+# never actually triggers `"clicked"`. Neither is a defect in this
+# project's own code, and this is a second, separate, real
+# input-delivery limitation, additional to (not a fix for) the raw X11
 # mouse-click limitation `scripts/manual_verify.sh` already documents -
-# button-click *effects* remain unconfirmed live by either route here.
-# Every one of those effects still has real, passing coverage via
+# button-click *effects* remain unconfirmed live by any route tried so
+# far. Every one of those effects still has real, passing coverage via
 # `tests/buildrun_smoke.bas`/`tests/gitui_smoke.bas` against the exact
 # same underlying functions.
 #
