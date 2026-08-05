@@ -2,11 +2,11 @@
 
 [[package]]
 name = "eb-cjson"
-path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-cjson_v0.2.0"
-commit = "bbce6026d0318451c7b10109e040880948ec37e3"
-version = "0.2.0"
+path = "/home/yann64/.ebpm/cache/git/https___github.com_yann64_eb-cjson_v0.3.0"
+commit = "40c593e17a4e0785fed0619e61d10ddb540c30c7"
+version = "0.3.0"
 git = "https://github.com/yann64/eb-cjson"
-ref = "v0.2.0"
+ref = "v0.3.0"
 
 [[package]]
 name = "gtk4"

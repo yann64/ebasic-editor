@@ -97,7 +97,12 @@ SUB EnsureLspDoc()
 END SUB
 
 ''' Writes the buffer's current content to `path`, records it as the
-''' current file, and clears the modified flag.
+''' current file, and clears the modified flag - but only once the write
+''' has genuinely succeeded (checks WriteFileContents's own real
+''' g_file_set_contents result); a failed write (read-only filesystem,
+''' full disk, permissions) reports the failure via the status bar and
+''' leaves the modified flag/title untouched, rather than silently
+''' claiming success.
 SUB SaveToPath(path AS STRING)
     DIM rawText AS ANY PTR
     rawText = TextBufferGetText(gBuf)
@@ -112,7 +117,12 @@ SUB SaveToPath(path AS STRING)
     wasHasPath = gHasPath
     wasPath = gCurrentPath
 
-    CALL WriteFileContents(path, text)
+    DIM writeOk AS INTEGER
+    writeOk = WriteFileContents(path, text)
+    IF writeOk = 0 THEN
+        CALL LspSetStatus("failed to save " & path)
+        EXIT SUB
+    END IF
     CALL TextBufferSetModified(gBuf, 0)
     gCurrentPath = path
     gHasPath = 1
@@ -171,13 +181,15 @@ END SUB
 ''' Loads `path` into the editor buffer, records it as the current file,
 ''' and refreshes the sidebar to `path`'s own directory - shared by the
 ''' Open dialog and a sidebar file-row click (see filebrowser.bas's own
-''' OnSidebarRowActivated), so both behave identically. A no-op (silent)
-''' if `path` can't be read.
+''' OnSidebarRowActivated), so both behave identically. Reports failure
+''' via the status bar (rather than a silent no-op) if `path` can't be
+''' read.
 SUB LoadFileIntoEditor(BYVAL path AS STRING)
     DIM ok AS INTEGER
     DIM rawContents AS ANY PTR
     rawContents = ReadFileContents(path, ok)
     IF ok = 0 THEN
+        CALL LspSetStatus("failed to open " & path)
         EXIT SUB
     END IF
 
