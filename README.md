@@ -9,7 +9,9 @@ completion, `ebpm` for build/run/test, and real `git` integration.
 
 ## Status
 
-Early development, Linux-only (matching `eb-gtk4`'s own current scope). A
+Early development. Was "Linux-only" (matching `eb-gtk4`'s own earlier
+scope statement) - now confirmed to also **compile, link, and run for
+real on Haiku** (see "Haiku" below); Windows/macOS remain untried. A
 single window with a `GtkSourceView`, real eBasic syntax highlighting
 (`data/language-specs/ebasic.lang`), Open/Save (via `GtkFileChooserNative`,
 plus `Ctrl+S`), undo/redo, a modified-indicator in the window title, a
@@ -19,13 +21,36 @@ buttons spawning real `ebpm` commands, Source Control (status/diff/stage/
 unstage/commit/push/pull via the real `git` CLI), and now a file/project
 browser sidebar with git-status glyphs - all sharing one streaming output
 panel. This completes the editor's originally planned feature set (see
-`docs/architecture/roadmap.md` in the main `ebasic` repo). A real manual
-verification pass has now run for real (see "Manual verification
+`docs/architecture/roadmap.md` in the main `ebasic` repo). Two real
+verification passes have now run for real (see "Manual verification
 checklist" below) - window rendering, syntax highlighting, live LSP
-connectivity, sidebar navigation, and undo/redo are all confirmed live
-with screenshot evidence; button-click-driven actions and file-chooser
-dialogs remain open, blocked on that session's own input-delivery
-limitations rather than a known defect.
+connectivity, sidebar navigation (plus the file-load keyboard-focus gap
+it found, since fixed), and undo/redo are all confirmed live with
+screenshot/AT-SPI-state evidence; button-click-driven actions and
+file-chooser dialogs remain open, blocked on real, confirmed
+input-delivery limitations rather than a known defect.
+
+## Haiku
+
+`eb-gtk4`/`ebasic-editor` compile, link, **and run** on real Haiku
+hardware - confirmed directly, not assumed: `ebpm build` succeeds against
+Haiku's own real, installed `gtk4`/`gtksourceview5`/`glib2`/`cjson`
+HaikuPorts packages (`pkg-config --modversion gtk4` -> `4.23.2` on the
+box this was verified against), and the built binary renders a fully
+correct window there too (real eBasic syntax highlighting, real sidebar
+directory listing, `ebasic_lsp` connecting successfully) - screenshotted
+as proof, the same "verify, don't guess" bar as everywhere else in this
+project. A real, confirmed non-issue found along the way: the app (and
+even a minimal hand-written C GTK4 program) prints `Gtk-WARNING: Unable
+to acquire session bus: Cannot spawn a message bus when AT_SECURE is
+set` on that box - harmless, not fatal to `GApplication` startup (the
+window renders and the app keeps running regardless). The only real
+gotcha was environmental, not technical: launching a GUI app over SSH
+and expecting it to outlive the SSH command's own foreground lifetime
+needs the ssh invocation itself to stay attached (backgrounding via
+`nohup ... &`/`disown` got the *remote* process killed when the SSH
+channel closed in every attempt tried - a plain foreground `ssh host
+'./binary'` that's allowed to keep running is what actually worked).
 
 ## File browser sidebar
 
@@ -153,8 +178,10 @@ ebpm run
 
 Requires a real GTK4 display backend to actually show a window (this is a
 GUI application - there's no headless mode; see "Manual verification
-checklist" below for what a real one looks like, and `scripts/
-manual_verify.sh` for a scripted way to check). Requires `ebc`/`ebpm` built
+checklist" below for what a real one looks like, `scripts/
+manual_verify.sh` for a scripted screenshot-based check, and `scripts/
+atspi_verify.py` for a scripted accessible-tree/state check - both need
+`GDK_BACKEND=x11`). Requires `ebc`/`ebpm` built
 from a version including the upstream compiler fixes `eb-gtk4` itself
 needed (see its own README) - both are automatically fetched via `ebpm`'s
 registry (`gtk4`/`eb-cjson`), no manual setup beyond the GTK4 dev
@@ -212,34 +239,40 @@ sandboxed session, not app defects - summarized below).
       (`main.bas`, with correct syntax-highlighted content and an
       updated title) both work via keyboard (`Down`/`Return`) -
       `scripts/manual_verify.sh`'s `02`/`03_*.png`. **A real, minor UX
-      gap found in the process, not a functional bug**: loading a file
-      via the sidebar never moves keyboard focus into the editor
-      (`LoadFileIntoEditor` doesn't call a focus-grab) - you can type
-      immediately after using the Open dialog's own focus return, but
-      not after a sidebar click, until `eb-gtk4` gains a
-      `gtk_widget_grab_focus` binding (it has none today). Left as a
-      documented gap rather than fixed this pass, since it needs new
-      upstream `eb-gtk4` surface, not just an `ebasic-editor`-side
-      change.
+      gap found in the process, since fixed**: loading a file via the
+      sidebar didn't used to move keyboard focus into the editor
+      (`LoadFileIntoEditor` never called a focus-grab) - `eb-gtk4`
+      v0.6.0 added `WidgetGrabFocus` (`gtk_widget_grab_focus`) and
+      `main.bas` now calls it at the end of `LoadFileIntoEditor`,
+      confirmed working via a real AT-SPI state check
+      (`scripts/atspi_verify.py`: the editor's own `FOCUSED` state reads
+      true immediately after a sidebar file-load, not screen-scraped).
 - [ ] **Header-bar buttons** (Open Folder/Open/Save/Undo/Redo/Build/Run/
       Test) and the **Git toolbar** (Status/Diff/Stage/Unstage/Commit/
-      Push/Pull) - **not confirmed live**, for a real, confirmed reason:
-      synthetic X11 mouse clicks were never recognized by GTK4's gesture
-      recognizer in this sandboxed session at all (tried multiple ways -
-      moved-then-clicked, separate mousedown/mouseup, confirmed correct
-      pointer coordinates via `xdotool getmouselocation` - never once
-      registered, on any button or the sidebar itself), and reaching a
-      button via keyboard focus-traversal (Tab) then activating it
-      (Space/Return) was *not* reliably reproducible across repeated,
-      otherwise-identical attempts (see `scripts/manual_verify.sh`'s own
-      top comment for the full story) - a genuine input-delivery/timing
-      limitation of that specific environment, not a suspected app
-      defect. Every one of these buttons calls exactly the same
-      functions (`RunEbpmCommand`/`RunGitStatus`/etc.) the real, passing
+      Push/Pull) - **still not confirmed live**, now for *two* separate,
+      real, confirmed reasons (see `scripts/manual_verify.sh`'s and
+      `scripts/atspi_verify.py`'s own top comments for the full story of
+      each): (1) synthetic X11 mouse clicks were never recognized by
+      GTK4's gesture recognizer in this sandboxed session at all (tried
+      multiple ways, confirmed correct pointer coordinates); (2) AT-SPI's
+      own `Action.do_action` ("click") reports success at the D-Bus
+      protocol level - even after explicitly resolving and exporting the
+      real, canonical AT-SPI bus address via `org.a11y.Bus.GetAddress` to
+      rule out a stale/mismatched private bus - but was never observed to
+      produce any real effect either (cross-checked against
+      `NoFileOpenGuard` in `gitui.bas`, which should unconditionally
+      rewrite the output panel the instant a Git button's real handler
+      runs at all - it never did). Neither is a suspected app defect:
+      every one of these buttons calls exactly the same functions
+      (`RunEbpmCommand`/`RunGitStatus`/etc.) the real, passing
       `tests/buildrun_smoke.bas`/`tests/gitui_smoke.bas` already exercise
       end-to-end against real spawned processes - only the literal
       widget `"clicked"` signal (identical one-line `ObjConnect`
-      boilerplate on every button) remains unconfirmed live.
+      boilerplate on every button) remains unconfirmed live. AT-SPI *did*
+      prove valuable elsewhere: `scripts/atspi_verify.py` reliably
+      confirms every button/row's correct accessible name and reads
+      widget state (`FOCUSED`, etc.) directly - just not action dispatch,
+      in this environment.
 - [ ] **`GtkFileChooserNative` dialogs** (Open/Open Folder/Save As) -
       **no dialog window ever appeared**, in this specific environment,
       after triggering either action (confirmed via `xdotool search`
@@ -254,15 +287,19 @@ sandboxed session, not app defects - summarized below).
 
 **Net assessment**: every piece of *logic* this editor has is proven
 correct - either by the automated `ebpm test` suite (spawning real
-subprocesses, checking real output) or by this pass's own live,
-screenshotted evidence (window rendering, syntax highlighting, real LSP
-connectivity, sidebar navigation, undo/redo). What remains open is
-narrowly "does clicking a button with a real mouse on a real desktop
-actually fire GTK4's `clicked` signal" - which no environment available
-this session could conclusively prove or disprove, and which a
-genuinely different desktop session (or `dogtail`/AT-SPI-based
-automation, not available non-interactively here) would likely settle
-quickly.
+subprocesses, checking real output) or by these two passes' own live
+evidence (window rendering, syntax highlighting, real LSP connectivity,
+sidebar navigation + the focus-grab fix, undo/redo - screenshots plus
+real AT-SPI state reads, not screen-scraping guesses). What remains open
+is narrowly "does clicking a button with a real mouse on a real desktop
+actually fire GTK4's `clicked` signal" - tried via two independent
+routes this far (raw X11 input synthesis, then AT-SPI's own semantic
+action-dispatch after ruling out a bus-address mismatch) with neither
+conclusively proving or disproving it in the environments available.
+AT-SPI structural/state introspection (`scripts/atspi_verify.py`) is a
+real, working, permanent addition to this project's own verification
+toolkit regardless - just not the full answer to button clicks it was
+hoped to be.
 
 ## Architecture
 
@@ -276,5 +313,6 @@ quickly.
   to another process.
 - See [`docs/architecture/roadmap.md`](https://github.com/yann64/ebasic/blob/main/docs/architecture/roadmap.md)
   in the main `ebasic` repo for the full plan this was built from,
-  including its explicit scope cuts (Linux-only, single-document editing,
-  no branch/merge UI, a flat file list rather than a recursive tree).
+  including its explicit scope cuts (single-document editing, no
+  branch/merge UI, a flat file list rather than a recursive tree - the
+  original "Linux-only" cut no longer holds, see "Haiku" above).

@@ -31,6 +31,7 @@ CONST GDK_KEY_space = 32
 ' own hello_window example precedent (its clickCount global).
 DIM gWin AS Window
 DIM gBuf AS SourceBuffer
+DIM gView AS SourceView
 DIM gCurrentPath AS STRING
 DIM gHasPath AS INTEGER
 DIM gStatusLabel AS Label
@@ -193,6 +194,12 @@ SUB LoadFileIntoEditor(BYVAL path AS STRING)
     CALL UpdateTitle()
     CALL EnsureLspDoc()
     CALL RefreshSidebar(gSidebarBox, DirOf(path))
+    ' A real gap found during a live verification pass: without this,
+    ' keyboard focus stays on the sidebar's own ListBox after a file
+    ' loads (confirmed live), unlike the Open dialog's own path, so you
+    ' couldn't start typing right away - only after an extra Tab/click
+    ' into the editor yourself.
+    CALL WidgetGrabFocus(gView)
 END SUB
 
 SUB OnOpenResponse(dialog AS GObj PTR, responseId AS INTEGER, data AS ANY PTR)
@@ -345,21 +352,20 @@ SUB OnActivate(rawApp AS GObj PTR, data AS ANY PTR)
     CALL ObjConnect(gBuf, "modified-changed", @OnBufferModifiedChanged, 0)
     CALL ObjConnect(gBuf, "changed", @OnBufferChanged, 0)
 
-    DIM view AS SourceView
-    view = NewSourceViewWithBuffer(gBuf)
-    CALL TextViewSetMonospace(view, 1)
-    CALL TextViewSetWrapMode(view, GTK_WRAP_NONE)
-    CALL SourceViewSetShowLineNumbers(view, 1)
-    CALL SourceViewSetHighlightCurrentLine(view, 1)
+    gView = NewSourceViewWithBuffer(gBuf)
+    CALL TextViewSetMonospace(gView, 1)
+    CALL TextViewSetWrapMode(gView, GTK_WRAP_NONE)
+    CALL SourceViewSetShowLineNumbers(gView, 1)
+    CALL SourceViewSetHighlightCurrentLine(gView, 1)
 
     DIM keyCtrl AS EventControllerKey
     keyCtrl = NewEventControllerKey()
     CALL ObjConnect(keyCtrl, "key-pressed", @OnKeyPressed, 0)
-    CALL WidgetAddController(view, keyCtrl)
+    CALL WidgetAddController(gView, keyCtrl)
 
     DIM scroller AS ScrolledWindow
     scroller = NewScrolledWindow()
-    CALL ScrolledWindowSetChild(scroller, view)
+    CALL ScrolledWindowSetChild(scroller, gView)
 
     ' A read-only output panel, shared by Build/Run/Test's streamed ebpm
     ' output (see buildrun.bas) and Source Control's streamed git output
