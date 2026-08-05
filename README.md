@@ -249,40 +249,48 @@ sandboxed session, not app defects - summarized below).
       true immediately after a sidebar file-load, not screen-scraped).
 - [ ] **Header-bar buttons** (Open Folder/Open/Save/Undo/Redo/Build/Run/
       Test) and the **Git toolbar** (Status/Diff/Stage/Unstage/Commit/
-      Push/Pull) - **still not confirmed live**, now root-caused precisely
-      (a follow-up dig, same session): (1) synthetic X11 mouse clicks were
-      never recognized by GTK4's gesture recognizer in this sandboxed
-      session at all (tried multiple ways, confirmed correct pointer
-      coordinates); (2) AT-SPI's own `Action.do_action` ("click") also
-      doesn't work, but this time **conclusively isolated to GTK4's own
-      accessibility D-Bus handler, not this project's code or the Python
-      bindings** - confirmed by bypassing `gi.repository.Atspi` entirely
-      and calling the exact same D-Bus method directly (`busctl call
-      :1.106 /io/github/.../a11y/<uuid> org.a11y.atspi.Action DoAction i
-      0`, the button's own real per-widget object path, found via
-      `busctl tree`/`get-property ... Name`): it still returns `true`
-      with no real effect. A live `dbus-monitor` on the real AT-SPI bus
-      during a `do_action` call showed **no `DoAction` method call ever
-      appears on the wire at all** from the Python binding's own call
-      (only `org.a11y.atspi.Cache.AddAccessible` tree-registration
-      broadcasts) - yet the *direct* `busctl call` above genuinely does
-      send the real method call (confirmed via the same monitor) and GTK4
-      itself still just returns `true` without clicking anything. So:
-      two distinct, real, now precisely-isolated causes - a Python/GI
-      binding-level issue for `Atspi.Action.do_action` specifically, and
-      a separate GTK4-accessibility-bridge-level issue (in this GTK
-      4.22/4.23 build) where `DoAction` on a `GtkButton` is acknowledged
-      but never actually triggers `"clicked"`. Neither is a suspected
-      defect in this project's own code: every one of these buttons
-      calls exactly the same functions (`RunEbpmCommand`/`RunGitStatus`/
-      etc.) the real, passing `tests/buildrun_smoke.bas`/
-      `tests/gitui_smoke.bas` already exercise end-to-end against real
-      spawned processes - only the literal widget `"clicked"` signal
-      (identical one-line `ObjConnect` boilerplate on every button)
-      remains unconfirmed live. AT-SPI *did* prove valuable elsewhere:
-      `scripts/atspi_verify.py` reliably confirms every button/row's
-      correct accessible name and reads widget state (`FOCUSED`, etc.)
-      directly - just not action dispatch, in this environment.
+      Push/Pull) - **still not confirmed live on this host's GTK4 build**,
+      now root-caused precisely (a follow-up dig, same session): (1)
+      synthetic X11 mouse clicks were never recognized by GTK4's gesture
+      recognizer in this sandboxed session at all (tried multiple ways,
+      confirmed correct pointer coordinates); (2) AT-SPI's own
+      `Action.do_action` ("click") also doesn't work here, isolated to
+      GTK4's own accessibility D-Bus handler, not this project's code -
+      confirmed by bypassing `gi.repository.Atspi` entirely and calling
+      the exact same D-Bus method directly (`busctl call :1.106
+      /io/github/.../a11y/<uuid> org.a11y.atspi.Action DoAction i 0`, the
+      button's own real per-widget object path, found via `busctl
+      tree`/`get-property ... Name`): it still returns `true` with no
+      real effect on this host (GTK 4.22.4 + at-spi2-core 2.60.4 +
+      python3-gi 3.56.2, Ubuntu).
+      **Cross-version test (this session's follow-up), definitive
+      result: this is a real, version-specific regression, not a
+      fundamental AT-SPI limitation.** The identical test - same
+      `gtk4_test_app.py`, same `Atspi.Action.do_action(button, 0)` call -
+      run inside a disposable `debian:bookworm` Docker container (GTK
+      4.8.3 + at-spi2-core 2.46.0 + python3-gi 3.42.2, sharing the host's
+      X11 display via `docker run --net=host -v /tmp/.X11-unix:...`)
+      **genuinely triggers the button's real `"clicked"` handler
+      end-to-end** - confirmed two independent ways: a marker file the
+      handler writes appeared with the expected content, and the
+      button's own label visibly changed (screenshotted). So the same
+      Python code path that silently no-ops on GTK 4.22.4/at-spi2-core
+      2.60.4 works correctly on GTK 4.8.3/at-spi2-core 2.46.0 - somewhere
+      in that version range, GTK4's (or at-spi2-core's) AT-SPI
+      action-to-signal bridge regressed. Not yet bisected further (three
+      packages moved together across that range), and no upstream bug
+      report has been filed yet. Neither behavior is a suspected defect
+      in this project's own code: every one of these buttons calls
+      exactly the same functions (`RunEbpmCommand`/`RunGitStatus`/etc.)
+      the real, passing `tests/buildrun_smoke.bas`/`tests/gitui_smoke.bas`
+      already exercise end-to-end against real spawned processes - only
+      the literal widget `"clicked"` signal (identical one-line
+      `ObjConnect` boilerplate on every button) remains unconfirmed live
+      on this host's GTK4 version specifically. AT-SPI *did* prove
+      valuable elsewhere: `scripts/atspi_verify.py` reliably confirms
+      every button/row's correct accessible name and reads widget state
+      (`FOCUSED`, etc.) directly on this host - just not action dispatch,
+      in this specific GTK4/at-spi2-core version combination.
 - [ ] **`GtkFileChooserNative` dialogs** (Open/Open Folder/Save As) -
       **no dialog window ever appeared**, in this specific environment,
       after triggering either action (confirmed via `xdotool search`
@@ -302,14 +310,15 @@ evidence (window rendering, syntax highlighting, real LSP connectivity,
 sidebar navigation + the focus-grab fix, undo/redo - screenshots plus
 real AT-SPI state reads, not screen-scraping guesses). What remains open
 is narrowly "does clicking a button with a real mouse on a real desktop
-actually fire GTK4's `clicked` signal" - tried via two independent
-routes this far (raw X11 input synthesis, then AT-SPI's own semantic
-action-dispatch after ruling out a bus-address mismatch) with neither
-conclusively proving or disproving it in the environments available.
-AT-SPI structural/state introspection (`scripts/atspi_verify.py`) is a
-real, working, permanent addition to this project's own verification
-toolkit regardless - just not the full answer to button clicks it was
-hoped to be.
+actually fire GTK4's `clicked` signal" - and this session's cross-version
+Docker test resolved the *nature* of the gap even though it doesn't fix
+it here: it's a genuine regression in this host's specific GTK4/
+at-spi2-core/python3-gi version combination (confirmed working correctly
+on an older, real combination), not a fundamental limitation of AT-SPI-
+based automation, and not a defect in this project. AT-SPI structural/
+state introspection (`scripts/atspi_verify.py`) is a real, working,
+permanent addition to this project's own verification toolkit regardless
+of this gap.
 
 ## Architecture
 

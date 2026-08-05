@@ -57,11 +57,28 @@
 # `tests/buildrun_smoke.bas`/`tests/gitui_smoke.bas` against the exact
 # same underlying functions.
 #
+# FOLLOW-UP (same session): tested whether this is a fundamental AT-SPI
+# limitation or a real, version-specific bug, by running the identical
+# `Atspi.Action.do_action(button, 0)` call against a genuinely different,
+# older GTK4/at-spi2-core build - a disposable `debian:bookworm` Docker
+# container (GTK 4.8.3 + at-spi2-core 2.46.0 + python3-gi 3.42.2) sharing
+# the host's X11 display, versus this host's GTK 4.22.4 + at-spi2-core
+# 2.60.4 + python3-gi 3.56.2 (Ubuntu). Result: **on the older build, the
+# exact same call genuinely triggers the button's real "clicked" handler
+# end-to-end** - confirmed via a file the handler writes and via the
+# button's own label visibly changing (screenshotted). So this IS a real,
+# version-specific regression somewhere in the GTK4/at-spi2-core AT-SPI
+# action-to-signal bridge (not yet bisected to a single package - all
+# three moved together across that range) - not a fundamental limitation
+# of AT-SPI-based automation, and not a defect in this project. No
+# upstream bug report has been filed yet.
+#
 # So: this script verifies what AT-SPI *does* reliably prove here -
 # structural/state introspection - and pairs it with the proven
 # keyboard-driven interactions from `scripts/manual_verify.sh` (Return/
 # Down/Ctrl+Z, which really do work) wherever an actual interaction is
-# needed, rather than button clicks.
+# needed, rather than button clicks, on this host's specific GTK4/
+# at-spi2-core version.
 import gi
 
 gi.require_version("Atspi", "2.0")
