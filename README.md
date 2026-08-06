@@ -138,34 +138,34 @@ in the main `ebasic` repo) - the wire format itself is built with
   real dropdown with "PRINT"), and the background refresh mechanism is
   proven end-to-end by `tests/lsp_client_smoke.bas` (a real spawned
   `ebasic_lsp` round trip populates the hidden buffer with both a
-  keyword and a variable this test's own document declares). **Not yet
-  confirmed live**: keyboard-driven *acceptance* of a candidate (Tab/
-  Return inserting the full word) - several reasonable attempts via
-  synthetic X11 key events (immediate accept, an explicit `Down` to
-  select first, various timings) either fell through to ordinary text
-  editing or were silently swallowed with no insertion. A same-session
-  follow-up investigation tried to isolate this the same way the
-  button-click regression was isolated earlier (a minimal, standalone
-  PyGObject reproduction of the identical `GtkSourceCompletionWords`
-  setup, tested against both this host's `gtksourceview-5` 5.18.0 and an
-  older 5.6.2 in a disposable Docker container) - but that minimal
-  reproduction **never got the popup to even show at all** (via an
-  explicit `completion.show()` call) on *either* version, ruling out a
-  simple version regression as the explanation for this specific gap
-  (unlike the button-click one, where the cross-version test gave a
-  clean, definitive answer). Tried varying several structural details in
-  the minimal repro (wrapping the view in a `GtkScrolledWindow`, giving
-  the buffer a real `GtkSourceLanguage`, much longer warm-up waits) -
-  none reproduced the popup showing there either, so there's something
-  about `ebasic-editor`'s own real setup this minimal repro isn't
-  capturing, not yet identified. In the real app itself, real X11
-  keyboard focus stays on the main window throughout (confirmed via
-  `xdotool getwindowfocus`) - it never moves to the popup's own separate
-  window - which is consistent with, but doesn't fully explain, Return/
-  Tab not being intercepted as an accept. Left as a genuinely open,
-  investigated-but-unresolved item, not a defect assumed in
-  `GtkSourceCompletion` itself (real, widely-used library code, not
-  something this project wrote).
+  keyword and a variable this test's own document declares).
+  **The accept mechanism itself is now understood and confirmed working
+  in isolation**: `GtkSourceCompletion` does not pre-select a candidate
+  just because the popup is showing - `Return`/`Tab` alone dismiss it
+  with no insertion; an explicit `Down` (or `Up`) to actually select an
+  entry first is required before `Return`/`Tab` accepts it (standard
+  combo-box-style semantics, not a bug). This was confirmed end to end -
+  candidate highlighted, then genuinely inserted - in a minimal,
+  standalone `eb-gtk4`-only reproduction (no LSP, no file browser)
+  built specifically to isolate this, bypassing an earlier, inconclusive
+  PyGObject-based cross-version Docker test that never got the popup to
+  even show at all on either GTK version tried, so gave no useful
+  signal either way. **Still open**: this same `Ctrl+Space` → `Down` →
+  `Return` sequence, confirmed working in the minimal reproduction,
+  could not be reproduced via synthetic X11 key events in the full
+  `ebasic-editor` app in this sandboxed session - the popup transitions
+  to an unmapped (`WM_STATE: Withdrawn`) X11 state very shortly after
+  `Down` is sent there, unlike the minimal repro where it stays visible
+  with the candidate highlighted. Root cause of that specific
+  discrepancy is unidentified (ruled out: a background completion-words
+  refresh arriving mid-interaction and disrupting the popup, and the
+  presence of a diagnostics squiggle tag on the same text). Given this
+  session's own repeated, independently-confirmed history of synthetic-
+  X11-input limitations in this exact sandbox (real mouse clicks and
+  some AT-SPI action-dispatch paths are also unreliable here), a real,
+  physical keyboard on a real desktop session may well not hit this at
+  all - but that's not yet verified either way, so it stays open rather
+  than assumed fixed.
 - **Single-document scope**: a `publishDiagnostics` for a file other than
   the one currently open (e.g. an `#include`d file) isn't rendered
   inline; a go-to-definition landing in a different file reports where
@@ -271,9 +271,12 @@ sandboxed session, not app defects - summarized below).
       after loading a real file showed a genuine `GtkSourceCompletion`
       dropdown with a real candidate (screenshotted). The background
       refresh that keeps it current is proven end-to-end by
-      `tests/lsp_client_smoke.bas`. Keyboard-driven *acceptance* of a
-      candidate specifically wasn't confirmed live this pass (see
-      "Editing" section above) - an honest, open item, not claimed done.
+      `tests/lsp_client_smoke.bas`. The real accept mechanism (`Down` to
+      select, then `Return`/`Tab`) is now understood and confirmed
+      working end to end in an isolated `eb-gtk4`-only reproduction; the
+      same sequence remains unreproduced via synthetic X11 input in the
+      full app specifically (see "Editing" section above) - an honest,
+      open item, not claimed done.
 - [x] **Undo/Redo** (`Ctrl+Z`/`Ctrl+Shift+Z`) - confirmed live: a real
       edit, undone, then redone, with the correct content at each step
       (`scripts/manual_verify.sh`'s `04`/`05`/`06_*.png`).
